@@ -140,8 +140,8 @@ export async function crawlGame(baseUrl, { log = () => {} } = {}) {
       }
     }));
   }
-  // Data the game fetches by literal path: JSON (atlas layouts, sound events: scripts such as the
-  // Minecraftizer read their format) and WebAssembly (the world engine: "/engine.wasm"). Wasm is stored
+  // Data the game fetches by literal path: JSON (atlas layouts, sound events: so a script that reads
+  // their format can anchor on it) and WebAssembly (the world engine: "/engine.wasm"). Wasm is stored
   // as a Buffer; its export names go into `modules` so export changes show up in the change report.
   const wasmRefs = new Set(), jsonRefs = new Set();
   for (const [path, src] of files) {

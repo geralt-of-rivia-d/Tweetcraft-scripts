@@ -24,7 +24,6 @@ rules win.
 | `tampermonkey` | henkisdabro/wookstar-claude-plugins | Userscript headers, sandbox modes, `@run-at`, CSP, common pitfalls, debugging |
 | `webgl` | shreyam1008/shre-skills | WebGL2 cost model and performance checklist |
 | `shader-art-coding` | gokayfem/shader-skills | Tested GLSL ES 3.00 functions (noise, PCG hash, sky, water optics, tonemapping) and technique references |
-| `minecraft-resource-pack` | Jahrome907/minecraft-agent-skills | Vanilla texture paths, animation `.mcmeta`, pack layout (for the Minecraftizer) |
 
 ## Considered but not installed (2026-11-01 search)
 

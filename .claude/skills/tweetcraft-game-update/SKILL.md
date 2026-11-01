@@ -14,7 +14,8 @@ description: Handle a Tweetcraft game update or anything red, such as a "Tweetcr
 - **`npm run check` warns that a codemap is behind the latest build:** the game moved on since the map was verified.
 - **"Upstream has new commits" issue:** AndresTube's original repo changed, and may contain its own fix for a
   game update. Run `git fetch upstream && git log --stat main..upstream/main`. Merge or cherry-pick what's
-  useful (then `npm test`), or close the issue to dismiss it. This repo pushes as its own account: never touch
+  useful (then `npm test`), or close the issue to dismiss it. The Minecraftizer (`tweetcraft-minecraftizer.js`)
+  is discontinued here: skip upstream changes to it, and resolve a modify/delete conflict by keeping it deleted. This repo pushes as its own account: never touch
   git credentials to do this.
 
 ## 1. See what changed

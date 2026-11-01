@@ -16,7 +16,7 @@ paths:
   with `@grant none` and the smoke harness shims. Existing hard-coded strings (`bus.version`) must match
   `@version`.
 - **One self-contained IIFE per file.** Start it with `'use strict'`, and keep globals behind one namespaced object
-  (`window.Twitterentary`, `window.__mcTextures`...) for debugging and cross-script use.
+  (`window.Twitterentary`, `window.__mcChatHistory`...) for debugging and cross-script use.
 - **Run at `document-start`.** Patch prototypes (`WebGL2RenderingContext.prototype`, `HTMLImageElement.prototype`)
   before the game's modules load: the renderer compiles its shaders in the `Gfx` constructor during boot. Touch the
   DOM only after it exists (`DOMContentLoaded`, or poll for the element).

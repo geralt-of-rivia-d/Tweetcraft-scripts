@@ -8,7 +8,6 @@ A collection of userscripts for [TweetCraft](https://tweetcraft.jai.vin). Instal
 - **Tweetcraft Zoom** - Hold a key to zoom in and adjust your FOV for a closer look.
 - **Tweetcraft Better Options** - Adds a custom options menu for graphics, interface, keybinds, shaders, and zoom settings.
 - **Tweetcraft Chat History** - Minecraft-style chat history: press Up and Down to recall previously sent messages and commands.
-- **Tweetcraft Minecraftizer** - Replaces TweetCraft textures with vanilla Minecraft textures for blocks, items, and the environment.
 
 ## Notes
 

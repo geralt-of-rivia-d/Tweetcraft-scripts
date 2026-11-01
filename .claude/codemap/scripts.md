@@ -1,10 +1,10 @@
 # Codemap: our Tweetcraft userscripts
 
-Verified on 2026-11-01 against the working copies and game build d7bde3deb9 (the same game code as builds b4bc035ec8 and 26479914e5, which were hashed over fewer files). Abbreviations: **SH** `twitterentary-shaders.user.js`, **BO** `tweetcraft-better-options.js`, **ZM** `tweetcraft-zoom.user.js`, **CH** `tweetcraft-chat-history.js`, **MC** `tweetcraft-minecraftizer.js`, **game:** = `game/prod/<LATEST>/pretty/js/`; its line numbers hold while the snapshot's JS is unchanged from that build. `SH:120` means file:line. Anything not checked directly in code is marked (inferred).
+Verified on 2026-11-01 against the working copies and game build d7bde3deb9 (the same game code as builds b4bc035ec8 and 26479914e5, which were hashed over fewer files). Abbreviations: **SH** `twitterentary-shaders.user.js`, **BO** `tweetcraft-better-options.js`, **ZM** `tweetcraft-zoom.user.js`, **CH** `tweetcraft-chat-history.js`, **game:** = `game/prod/<LATEST>/pretty/js/`; its line numbers hold while the snapshot's JS is unchanged from that build. `SH:120` means file:line. Anything not checked directly in code is marked (inferred).
 
 ## 1. How the scripts relate
 
-All five scripts are standalone `document-start` IIFEs on `https://tweetcraft.jai.vin/*`. **BO is the hub.** It sets up `window.__tcOptions` synchronously when it runs (BO:52). The tooling loads BO first (`tools/lib/common.mjs:63-68`), and ZM polls every 200 ms until the bus exists (ZM:133-135), so for the bus itself load order doesn't matter. Load order does decide which capture listener on `window` runs first. **SH** only needs to wrap `WebGL2RenderingContext.prototype` before gfx.js calls `getContext` (game:gfx.js:721). **MC** only needs to replace `HTMLImageElement.prototype.src` before engine.js loads block images (game:engine.js:78). SH does **not** use the bus. It reads `tc.shader.<key>` once at startup (SH:47-55) and publishes `window.Twitterentary`. BO's Shaders tab reads `Twitterentary.cfg` and `.schema` each time the tab is built, then writes both `cfg[key]` and `tc.shader.<key>` (BO:501-528). BO also calls `TE.apply`, which doesn't exist. CH and MC share nothing with the others. BO writes the game's `mc.fov` and `mc.rd` (and ZM writes `mc.fov` when BO is missing). BO and SH both write toasts into `#note`.
+All four scripts are standalone `document-start` IIFEs on `https://tweetcraft.jai.vin/*`. **BO is the hub.** It sets up `window.__tcOptions` synchronously when it runs (BO:52). The tooling loads BO first (`tools/lib/common.mjs:63-68`), and ZM polls every 200 ms until the bus exists (ZM:133-135), so for the bus itself load order doesn't matter. Load order does decide which capture listener on `window` runs first. **SH** only needs to wrap `WebGL2RenderingContext.prototype` before gfx.js calls `getContext` (game:gfx.js:721). SH does **not** use the bus. It reads `tc.shader.<key>` once at startup (SH:47-55) and publishes `window.Twitterentary`. BO's Shaders tab reads `Twitterentary.cfg` and `.schema` each time the tab is built, then writes both `cfg[key]` and `tc.shader.<key>` (BO:501-528). BO also calls `TE.apply`, which doesn't exist. CH shares nothing with the others. BO writes the game's `mc.fov` and `mc.rd` (and ZM writes `mc.fov` when BO is missing). BO and SH both write toasts into `#note`.
 
 ```
   localStorage:   tc.shader.*             tc.options (JSON)            mc.fov / mc.rd (game-owned)
@@ -19,7 +19,7 @@ All five scripts are standalone `document-start` IIFEs on `https://tweetcraft.ja
           v                                         v #screen, "Options…" click, F1, Distance:, --u/--d
      game gfx.js GL calls                      game menus / HUD  <------------------------------------+ (fallback)
 
-  CHAT HISTORY --> #chatbox keydown (standalone)    MINECRAFTIZER --> HTMLImageElement.src + jsDelivr (standalone)
+  CHAT HISTORY --> #chatbox keydown (standalone)
 ```
 
 **Bus `window.__tcOptions`** (all defined in BO)
@@ -184,7 +184,7 @@ Uniforms derived from state rather than CFG: `uTime` (ST.time: VS waving, water)
 
 ## 4. tweetcraft-zoom.user.js (ZM, 162 lines)
 
-**Purpose:** hold a key (default `KeyC`) to divide FOV by `zoom` (1.5-20, mouse wheel adjusts while held) and scale mouse look by `look/zoom`. **Metadata:** `@version 1.1.0`, `@run-at document-start`, `@grant none`, `@namespace tweetcraft.zoom` (SH, BO and CH use `tweetcraft.twitterentary`; MC uses `https://tweetcraft.jai.vin`). No in-code version string.
+**Purpose:** hold a key (default `KeyC`) to divide FOV by `zoom` (1.5-20, mouse wheel adjusts while held) and scale mouse look by `look/zoom`. **Metadata:** `@version 1.1.0`, `@run-at document-start`, `@grant none`, `@namespace tweetcraft.zoom` (SH, BO and CH use `tweetcraft.twitterentary`). No in-code version string.
 
 | Name | Line | Purpose |
 |---|---|---|
@@ -216,31 +216,7 @@ Uniforms derived from state rather than CFG: `uTime` (ST.time: VS waving, water)
 
 **Hooks:** `#chatbox`, window `focusin`/`keydown` capture. **Hot path:** keydown, cheap. **Settings:** none.
 
-## 6. tweetcraft-minecraftizer.js (MC, 305 lines)
-
-**Purpose:** redirects game image loads under `/assets/` to vanilla Minecraft PNGs from `cdn.jsdelivr.net/gh/PrismarineJS/minecraft-assets@master/data/1.21.4/`, loaded as same-origin `blob:` URLs. It rebuilds the item atlas and slices the moon phases. **Metadata:** `@version 1.0.0`, `@run-at document-start`, **`@grant unsafeWindow`** (the only script in the sandbox; `W = unsafeWindow`), `@namespace https://tweetcraft.jai.vin`, `@author you`. **`CFG.version '1.21.4'` (20) is the Minecraft asset version, not the script version.**
-
-| Name | Line | Purpose |
-|---|---|---|
-| `W`, guard | 15-17 | page window |
-| `CFG` | 19 | repo, branch, CDN, concurrency 16, timeout 15 s, cache, categories (gui and font off) |
-| `BLOCK_ALIAS, BLOCK_SKIP, MOON` | 40-50 | name fixes, skipped blocks (fire, portals), phase order |
-| `cdnURL` | 52 | builds the jsDelivr or raw GitHub URL |
-| `slot, pump` | 60-68 | concurrency limiter |
-| `fetchBlobURL` | 70 | fetch with abort timeout → `URL.createObjectURL`; counts `replaced/failed` (declared at 261) |
-| `texCache, loadCandidates` | 90-102 | memoized first-success over the candidate URLs (null results cached too) |
-| `loadImageEl` | 104 | `new W.Image()` promise |
-| `getItemAtlas` | 113 | fetches `/assets/atlas/items.json` and `.webp`, draws each MC item into its rect on a canvas, returns a PNG blob |
-| `getMoon` | 152 | slices `environment/moon_phases.png` into 8 blobs of 16×16 |
-| `dedupe, mapGameAsset` | 178-250 | `/assets/<cat>/…` → `{kind:'atlas'}`, `{kind:'moon', name}` or `{kind:'tex', key, cands}` for `atlas/items.webp`, `block/*`, `env/{clouds,sun,rain,snow,end_sky}.png`, `env/moon/*`, `entity/steve.png`, `item/*`, `misc/*`, gui/font (off) |
-| `resolveAsset` | 252 | dispatches by kind |
-| `Native`, counters, `origOf`, `blobOrig` | 258-265 | original `src` descriptor; element→original URL; blob→original URL |
-| `src` property override | 267-294 | getter reports the original URL; setter passes `data:`/`blob:`/unmapped through, otherwise sets it asynchronously once resolved and falls back to the original on failure |
-| `W.__mcTextures` | 296 | `{config, stats(), clearCache(), baseURL}` |
-
-**Hooks:** `HTMLImageElement.prototype.src` (game:engine.js:5-9 uses `img.src =`; engine.js:78 awaits every block image). `fetch` is not hooked: `getItemAtlas` fetches `/assets/atlas/items.json` and `.webp` itself (119-120). **Hot path:** every `img.src` get or set (string parsing on set, `Map.has` on get). Startup is bound by CDN latency. **Settings:** compile-time `CFG`; `__mcTextures.config` changes affect only later loads.
-
-## 7. Issues & smells
+## 6. Issues & smells
 
 | # | Where | Why it matters | Suggested fix |
 |---|---|---|---|
@@ -281,13 +257,7 @@ Uniforms derived from state rather than CFG: `uTime` (ST.time: VS waving, water)
 | 35 | CH keydown 84-89 | the microtask runs right after this capture listener (microtask checkpoint between listeners for browser events), before the game's `suggest.key(e)` → `preventDefault` (game:main.js:2331), so history and suggestions both move on Up/Down | check the suggestion list's visibility, or defer with `setTimeout(0)` |
 | 36 | CH `up/down` 51-64 | no `preventDefault`, so the input's default ArrowUp caret move runs after `setValue` (inferred), leaving the caret at the start | `preventDefault` once you know you're handling the key |
 | 37 | CH keydown 70 | doesn't check `__tcOptions.capturing`/`__tcCaptured` (rule); low risk because it runs only while chat is open | add the guard for consistency |
-| 38 | MC `src` setter 286-292 | async swap with no per-element token: a second `src` set before the fetch resolves gets overwritten by the stale `.then` | store a token and compare it in `then` |
-| 39 | MC `mapGameAsset`/setter 180, 276 | only `.src =` is hooked; `setAttribute('src')`, `srcset`, HTML `<img>` and CSS bypass it (fine today: game:engine.js:9) | hook `setAttribute` as well, or document the limit in compat |
-| 40 | MC `CFG` 22, `fetchBlobURL` 70, `loadCandidates` 94 | unpinned `@master`; world load waits for every block image (game:engine.js:78), with 16 concurrent fetches, a 15 s timeout and sequential fallbacks | pin a tag or commit; cache in Cache Storage; shorter timeout |
-| 41 | MC `fetchBlobURL` 76-82 vs 261-262 | uses `let replaced/failed` declared 180 lines later. It's safe today, because every access follows `await slot()` and the `src` setter (the only caller path) is installed at 267, but it reads like a TDZ bug (readability only) | move the counters above `fetchBlobURL` |
-| 42 | MC `loadCandidates` 100 | failures are cached as `null` for the session; blob URLs are never revoked | don't cache null; revoke on `clearCache` |
 | 44 | BO `setFov` 116-117 | clamps FOV to 2-110 and writes it to `mc.fov`, but the game only accepts 30-110 on load (game:main.js:205-208). Any FOV below 30, e.g. a reload while zoomed, comes back as 70 | keep the stored `mc.fov` at 30 or more, and hold the low zoom FOV only in memory |
 | 45 | BO `patchHudScale` 211 + 221 | **hint and tab are scaled twice** when UI scale ≠ 1. `Hud.draw` passes its already-scaled `o.gs` to `this.hint`/`this.tab` (game:ui.js:515-516, their only callers), and the `wrapScale('hint'/'tab')` wrappers scale it again (gs·m²). `hint` partly clamps to the screen; the `tab` player list doesn't | drop the `hint`/`tab` wrappers (`draw` already covers them), keeping `suggestions` |
 | 46 | SH `SHADOW_VS` 696 | copies only the plain tile UV, but the game's terrain VS remaps UVs for shaped faces (`aPos.y >> 12u`, `RECT[]`/`BOXUV[]`), so cutout shadows of shaped blocks (torches...) sample the wrong texels | port the game VS's UV remap into `SHADOW_VS` |
 | 47 | BO `isTouch` 168 | ignores the game's `?touch` URL param (the game: `matchMedia(...) \|\| params.has("touch")`), so with `?touch` `uiBase()` gives a different `--u` and overrides the game's even at scale 1 | also check `new URLSearchParams(location.search).has('touch')` |
-| 48 | MC mappings 207 | the `rain.png`, `snow.png` and `end_sky.png` mappings are dead: the game never loads those files | remove them, or keep them with a comment if a future game version is expected to |

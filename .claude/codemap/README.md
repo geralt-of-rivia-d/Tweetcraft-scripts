@@ -22,8 +22,7 @@ they disagree, fix the map.
 │   ├── twitterentary-shaders.user.js   WebGL2/GLSL patching: shadows, waving plants, water, sky
 │   ├── tweetcraft-better-options.js    options menu + settings bus window.__tcOptions + HUD/UI scale
 │   ├── tweetcraft-zoom.user.js         hold-to-zoom (FOV via Better Options' fov API)
-│   ├── tweetcraft-chat-history.js      Up/Down chat recall
-│   └── tweetcraft-minecraftizer.js     swaps game textures for Minecraft ones (HTMLImageElement.src)
+│   └── tweetcraft-chat-history.js      Up/Down chat recall
 ├── compat/expectations.mjs      what every script needs from the game (source / runtime / shaders checks)
 ├── tools/                       Node tooling (no build step)
 │   ├── snapshot.mjs             fetch game → game/<target>/<time>-<build>/ + change report

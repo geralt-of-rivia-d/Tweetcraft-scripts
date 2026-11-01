@@ -88,9 +88,9 @@ Notes:
   there. `openPause()` returns immediately until you've joined a world (`!S.started`, `pretty/js/menus.js`
   `openPause`), so the pause menu and its `Distance:` button never render in the probe.
 - **The probe doesn't wait for full boot.** Its shader-count wait can finish before `boot()` reaches
-  `M.initMenus(G)` (`main.js`, after `await loadTiles`). Until then, `menus.js` functions throw on `G.S`. The
-  Minecraftizer (`--scripts`) delays exactly that await, so add `--wait 10000` for menu or UI probes, or load
-  fewer scripts with `--only`.
+  `M.initMenus(G)` (`main.js`, after `await loadTiles`). Until then, `menus.js` functions throw on `G.S`. In
+  practice boot finishes first (menu probes with `--scripts` work without a wait), but if one throws
+  `Cannot read properties of null (reading 'S')`, add `--wait 10000`.
 - **Joining needs a server:** joining a world needs the multiplayer backend and can involve a Turnstile check, so
   don't automate it. Ask the user to test in-game behaviour in real Chrome with the dev loaders (`npm run dev`).
 - **Staging:** `--target staging` probes the staging host named in `js/devhost.js`, which may run newer code.

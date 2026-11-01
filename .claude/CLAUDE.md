@@ -43,7 +43,7 @@ There is no snapshot on a fresh clone: run `npm install && npm run snapshot` fir
 - Userscripts are in the repo root (`*.js` with a `// ==UserScript==` block):
   - `twitterentary-shaders.user.js`: GLSL patching, shadows, waving plants, water, sky
   - `tweetcraft-better-options.js`: options menu and the shared settings bus `window.__tcOptions`
-  - `tweetcraft-zoom.user.js`, `tweetcraft-chat-history.js`, `tweetcraft-minecraftizer.js` (texture swap)
+  - `tweetcraft-zoom.user.js`, `tweetcraft-chat-history.js`
 - `compat/expectations.mjs`: what each script needs from the game
 - `tools/`: snapshot, check, smoke and dev-loaders
 - `.github/workflows/game-watch.yml`: runs everything daily, and on every push and PR, for prod and staging. When
@@ -66,7 +66,7 @@ Don't skip phases. Scale their depth to the change.
 ## Knowledge base
 
 - `.claude/codemap/README.md`: repo layout, how the pieces relate, and **where new things belong**
-- `.claude/codemap/scripts.md`: our five scripts, function by function, plus known issues
+- `.claude/codemap/scripts.md`: our four scripts, function by function, plus known issues
 - `.claude/codemap/game-core.md`, `game-rendering.md`, `game-ui.md`: how the game works
 - `game/prod/<LATEST>/MODULES.md`: generated map of all game modules, always matching the snapshot
 
@@ -78,8 +78,8 @@ Don't skip phases. Scale their depth to the change.
 - `tweetcraft-ui`: menus, settings tabs, keybinds, HUD, matching the game's look
 - `tweetcraft-new-userscript`: creating a new script end to end
 - `tweetcraft-game-update`: the game changed, or check/smoke/CI is red
-- Third-party reference skills (vetted, MIT; repo rules win on conflicts): `tampermonkey`, `webgl`,
-  `shader-art-coding` (GLSL building blocks) and `minecraft-resource-pack`. See `.claude/skills/README.md`.
+- Third-party reference skills (vetted, MIT; repo rules win on conflicts): `tampermonkey`, `webgl`
+  and `shader-art-coding` (GLSL building blocks). See `.claude/skills/README.md`.
 - Agent `game-code-explorer`: delegate "where/how does the game do X" questions so the 690 KB of game code
   stays out of your context
 - Agent `userscript-reviewer`: review script changes before they ship

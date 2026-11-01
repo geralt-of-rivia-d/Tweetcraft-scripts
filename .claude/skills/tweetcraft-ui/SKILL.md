@@ -119,7 +119,7 @@ registerWithBus();
 - `npm run probe -- --only options --only <your-script> "(async () => { await window.__tcOptions.open(); return document.querySelector('#screen .inner')?.innerText })()"`
   dumps what the menu renders. Without the `await`, it reads the DOM before the menu exists and returns `""`.
   The probe evaluates once the shader count settles, which isn't necessarily after `boot()` has reached
-  `initMenus`. With all scripts loaded (`--scripts`), the Minecraftizer delays boot on CDN fetches, `open()`
-  throws `Cannot read properties of null (reading 'S')`, and you need `--wait 10000`.
+  `initMenus`. If `open()` throws `Cannot read properties of null (reading 'S')`, boot wasn't done yet: add
+  `--wait 10000`.
 - `npm run smoke -- --headed --only options` to look at it. Then ask the user to check the real game at a few
   window sizes and UI scales, and on touch if relevant.

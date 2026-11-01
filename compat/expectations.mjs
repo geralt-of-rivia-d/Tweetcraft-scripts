@@ -20,7 +20,6 @@ const SHADERS = 'twitterentary-shaders.user.js';
 const OPTIONS = 'tweetcraft-better-options.js';
 const ZOOM = 'tweetcraft-zoom.user.js';
 const CHAT = 'tweetcraft-chat-history.js';
-const MC = 'tweetcraft-minecraftizer.js';
 
 export const source = [
   // --- Twitterentary shaders: GLSL anchors used by patchSource() and the patch* functions
@@ -141,21 +140,6 @@ export const source = [
   { script: CHAT, file: 'js/main.js', test: /\.chatOpen\s*\)\s*\{\s*if\s*\(\s*\w+\.key\(\s*\w+\s*\)\s*\)\s*\w+\.preventDefault\(\)\s*;\s*else\s+if\s*\(\s*\w+\.key\s*===\s*["']Enter["']\s*\)/, why: 'chat is sent on keydown Enter (recorded first in our capture listener); the suggestion list claims keys with preventDefault' },
   { script: CHAT, file: 'js/chat-suggest.js', test: /\.key\s*===\s*["']ArrowUp["']\s*\|\|\s*\w+\.key\s*===\s*["']ArrowDown["']/, why: 'the suggestion list uses Up/Down while shown; history steps aside when the event is defaultPrevented' },
 
-  // --- Minecraftizer: game asset URLs it maps to Minecraft textures
-  { script: MC, file: 'js/main.js', test: 'atlas/items.webp', why: 'the item atlas is replaced' },
-  { script: MC, file: 'js/engine.js', test: 'assets/block/', why: 'block textures load from /assets/block/<name>.png' },
-  { script: MC, file: 'js/gfx.js', test: 'env/', why: 'the moon loads from /assets/env/moon/ in gfx.js (sun and clouds load in main.js, below)' },
-  { script: MC, file: 'assets/atlas/items.json', test: /^\s*\{(\s*"[^"]+"\s*:\s*\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]\s*,?)+\s*\}\s*$/, why: 'getItemAtlas() fetches /assets/atlas/items.json and redraws every { name: [x, y, w, h] } rect over the items.webp atlas' },
-  { script: MC, file: 'js/engine.js', test: /function loadImage\([^)]*\)\s*\{[\s\S]{0,300}?(?:new Image\b|createElement\(\s*["']img["']\s*\))[\s\S]{0,300}?\.src\s*=/, why: 'game images load through an <img> and .src =, the setter that is replaced' },
-  { script: MC, file: 'js/main.js', test: /^(?=[\s\S]*loadImage\(\s*["']\/assets\/["']\s*\+)(?=[\s\S]*["']env\/clouds\.png["'])(?=[\s\S]*["']env\/sun\.png["'])(?=[\s\S]*["']entity\/steve\.png["'])/, why: 'clouds, sun and Steve load as /assets/env/clouds.png, env/sun.png, entity/steve.png' },
-  { script: MC, file: 'js/gfx.js', test: /^(?=[\s\S]*\.src\s*=\s*`\/assets\/env\/moon\/\$\{)(?=[\s\S]*["']full_moon["'])(?=[\s\S]*["']waning_gibbous["'])(?=[\s\S]*["']third_quarter["'])(?=[\s\S]*["']waning_crescent["'])(?=[\s\S]*["']new_moon["'])(?=[\s\S]*["']waxing_crescent["'])(?=[\s\S]*["']first_quarter["'])(?=[\s\S]*["']waxing_gibbous["'])/, why: 'moon phases load as /assets/env/moon/<phase>.png with the vanilla phase names, sliced from moon_phases.png' },
-  { script: MC, file: 'js/inventory.js', test: '/assets/item/', why: 'item textures (the compass) load from /assets/item/' },
-  { script: MC, file: 'js/entities/index.js', test: '/assets/misc/enchanted_glint_', why: 'the enchantment glint loads from /assets/misc/' },
-  { script: MC, file: 'engine.wasm', test: /^(?=[\s\S]*end_portal_frame_side_full)(?=[\s\S]*end_portal_frame_top_eye)(?=[\s\S]*lantern_hanging)(?=[\s\S]*lantern_top)(?=[\s\S]*fire_0)(?=[\s\S]*nether_portal)(?=[\s\S]*end_portal\b)/, why: 'BLOCK_ALIAS / BLOCK_SKIP use these game texture names' },
-  { script: MC, file: 'js/gfx.js', test: '/assets/block/fire_1.png', why: 'BLOCK_SKIP: fire_1 (the game animates fire itself)' },
-  { script: MC, file: 'js/gfx.js', test: /animateFire\((?:[^()]|\([^()]*\))*\)\s*\{\s*this\.animateLayer\([^,]+,\s*["']fire_0["']\s*,[^)]*\)\s*;\s*this\.animateLayer\([^,]+,\s*["']nether_portal["']\s*,[^)]*\)\s*;\s*this\.animateLayer\([^,]+,\s*["']end_portal["']\s*,[^)]*\)\s*;?\s*\}/, why: 'BLOCK_SKIP = the textures the game animates itself (img.decode() + .mcmeta right after .src =, which an async swap breaks); a new one here likely needs skipping' },
-  { script: MC, file: 'js/engine.js', test: /\.drawImage\(\s*\w+\s*,\s*0\s*,\s*0\s*,\s*16\s*,\s*16\s*,\s*0\s*,\s*0\s*,\s*16\s*,\s*16\s*\)/, why: 'atlas tiles are the top-left 16x16 of each block image, so taller vanilla textures (animation strips) still fit' },
-
   // --- The smoke test itself: runtime checks below wait for this flag before testing a loaded world
   { script: [SHADERS, OPTIONS, ZOOM], file: 'js/main.js', test: /window\.__ready\s*=\s*(?:true|!0)/, why: 'the game sets window.__ready = true once the world has loaded; runtime checks wait for it' },
 ];
@@ -215,9 +199,6 @@ export const runtime = [
     } },
   { script: CHAT, name: 'window.__mcChatHistory is available',
     run: () => !!window.__mcChatHistory || 'window.__mcChatHistory missing' },
-  { script: MC, name: 'game textures are being swapped for Minecraft ones',
-    run: async () => (await __tcwait(() => window.__mcTextures && window.__mcTextures.stats().swapped > 0, 30000))
-      || `nothing swapped: ${JSON.stringify(window.__mcTextures && window.__mcTextures.stats())}` },
   // Checks that open menus go last so they can't disturb the others.
   { script: [OPTIONS, ZOOM], name: 'Options screen has the FOV slider',
     run: async () => {
