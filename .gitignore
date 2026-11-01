@@ -1,0 +1,13 @@
+node_modules/
+
+# Local snapshots of the game's code (someone else's code - never commit it)
+game/
+
+# Generated Tampermonkey dev loaders (contain absolute local paths)
+dev/
+
+# Smoke test reports and screenshots
+reports/
+
+# Personal Claude Code settings (never commit)
+.claude/settings.local.json

@@ -1,0 +1,23 @@
+{
+  "name": "tweetcraft-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Userscripts for Tweetcraft, plus tooling to snapshot the game and check the scripts still fit it.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "snapshot": "node tools/snapshot.mjs",
+    "check": "node tools/check.mjs",
+    "smoke": "node tools/smoke.mjs",
+    "test": "node tools/check.mjs && node tools/smoke.mjs",
+    "dev": "node tools/dev-loaders.mjs",
+    "probe": "node tools/probe.mjs"
+  },
+  "devDependencies": {
+    "acorn": "^8.19.0",
+    "acorn-walk": "^8.3.5",
+    "playwright-core": "^1.64.1",
+    "prettier": "^3.9.10"
+  }
+}

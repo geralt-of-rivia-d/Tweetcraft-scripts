@@ -1,0 +1,199 @@
+# Checks the userscripts against the live game (production and staging):
+#  - every day, so a Tweetcraft update that breaks a script turns this red (GitHub emails you)
+#  - on every push and pull request, so a script change that breaks something is caught early
+# When the game's code changes, even if nothing breaks, a run on main opens a "Tweetcraft changed" issue
+# with the change report and the codemaps to re-verify. Each run's summary shows what changed, and the
+# "report-<target>" artifact has the smoke screenshot, results and the full diff.
+# The daily run also opens an issue when the original repo (AndresTube/tweetcraft-scripts) has new commits.
+name: Game watch
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 7 * * *' # daily at 07:23 UTC
+
+concurrency:
+  # One group per event type, so a push never cancels the daily run (or the other way round). Pushes get
+  # one group per commit: GitHub cancels a *pending* run when a newer one queues in the same group, and
+  # each push's version check only covers that push's own commits, so none may be skipped.
+  group: game-watch-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [prod, staging]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the version check compares the scripts with the published commit
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Keep earlier snapshots between runs so each run can report what changed in the game.
+      # (Only saved when the job passes, so a breaking update keeps being reported until it's fixed.)
+      - uses: actions/cache@v4
+        with:
+          path: game/${{ matrix.target }}
+          key: game-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: game-${{ matrix.target }}-
+
+      - name: Snapshot the game
+        id: snapshot
+        timeout-minutes: 6
+        run: npm run snapshot -- --target ${{ matrix.target }}
+
+      - name: Static checks
+        id: check
+        env:
+          # "Published" for the version check: the PR's base branch, or main as it was before this push.
+          TC_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'push' && github.event.before || '' }}
+        run: npm run check -- --target ${{ matrix.target }}
+
+      # Step time limits fail just that step, so the results below still get recorded and uploaded
+      # (a job that hits its own timeout counts as cancelled and would lose them).
+      - name: Smoke test in Chrome
+        id: smoke
+        if: ${{ !cancelled() }}
+        timeout-minutes: 8
+        run: npm run smoke -- --target ${{ matrix.target }}
+
+      - name: Record results for the notify job
+        if: ${{ always() }}
+        env:
+          TARGET: ${{ matrix.target }}
+          CHANGED: ${{ steps.snapshot.outputs.changed }}
+          FROM: ${{ steps.snapshot.outputs.from }}
+          BUILD: ${{ steps.snapshot.outputs.build }}
+          CHECK: ${{ steps.check.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
+        run: |
+          mkdir -p reports
+          printf 'target=%s\nchanged=%s\nfrom=%s\nbuild=%s\ncheck=%s\nsmoke=%s\n' \
+            "$TARGET" "$CHANGED" "$FROM" "$BUILD" "$CHECK" "$SMOKE" > "reports/status-$TARGET.env"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: report-${{ matrix.target }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # One issue per new game build (prod and staging usually move to the same build). If a failing run
+  # re-detects the same build the next day, it comments on the open issue instead of opening another.
+  notify:
+    name: notify
+    needs: watch
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    # Serialise issue creation across runs (a push run and the daily run can find the same new build).
+    concurrency:
+      group: game-watch-notify
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: report-*
+
+      - name: Open or update an issue per new game build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          shopt -s nullglob
+          status() { case "$1" in success) echo "✅ passed";; failure) echo "❌ failed";; *) echo "⏭️ ${1:-not run}";; esac; }
+          for f in report-*/status-*.env; do
+            target= changed= from= build= check= smoke=
+            . "./$f"
+            [ "$changed" = "true" ] || continue
+            out="issue-$build.md"
+            [ -f "$out" ] || printf 'Run: %s\n\n' "$RUN_URL" > "$out"
+            {
+              echo "## $target: \`$from\` → \`$build\`"
+              echo
+              echo "- \`npm run check\`: $(status "$check")"
+              echo "- \`npm run smoke\`: $(status "$smoke")"
+              echo
+              cat "$(dirname "$f")/changes-$target.md" 2>/dev/null || true
+              echo
+            } >> "$out"
+            echo "$target" >> "targets-$build"
+          done
+          for out in issue-*.md; do
+            build=${out#issue-}; build=${build%.md}
+            {
+              echo "**Next:** follow the \`tweetcraft-game-update\` skill. Snapshot locally, read the change report,"
+              echo "fix any broken hooks, then re-verify the codemaps listed above and put the new build id in their headers."
+            } >> "$out"
+            existing=$(gh issue list --state open --limit 200 --json number,title \
+              --jq "map(select(.title | contains(\"$build\"))) | .[0].number // empty")
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --body-file "$out"
+            else
+              gh issue create --title "Tweetcraft changed to build $build ($(paste -sd, "targets-$build" | sed 's/,/, /g'))" --body-file "$out"
+            fi
+          done
+
+  # Daily: has the original repo got commits we don't (e.g. its own fixes for a new game version)?
+  upstream:
+    name: upstream
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: New commits in AndresTube/tweetcraft-scripts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: https://github.com/AndresTube/tweetcraft-scripts
+        run: |
+          git fetch --quiet "$UPSTREAM" HEAD
+          head=$(git rev-parse --short=10 FETCH_HEAD)
+          # Upstream commits not in our history, ignoring ones already cherry-picked here.
+          new=$(git log --oneline --no-merges --right-only --cherry-pick HEAD...FETCH_HEAD)
+          if [ -z "$new" ]; then
+            echo "**upstream**: nothing new in AndresTube/tweetcraft-scripts (head \`$head\`)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo "AndresTube/tweetcraft-scripts has commits that aren't in this repo (upstream head \`$head\`):"
+            echo
+            echo '```'
+            echo "$new"
+            echo '```'
+            echo
+            echo "They may include fixes for a new Tweetcraft version. Review locally with"
+            echo '`git fetch upstream && git log --stat main..upstream/main`, then merge or cherry-pick what you want.'
+            echo 'Close this issue to dismiss these commits. A new issue opens only when upstream moves again.'
+          } > upstream.md
+          cat upstream.md >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::AndresTube/tweetcraft-scripts has new commits (head $head)"
+          existing=$(gh issue list --state all --search "\"$head\" in:title" --json number --jq '.[0].number // empty')
+          [ -n "$existing" ] || gh issue create --title "Upstream has new commits (head $head)" --body-file upstream.md
