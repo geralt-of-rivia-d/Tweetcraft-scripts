@@ -6,7 +6,7 @@ Claude Code loads a skill when its description matches the task. You can also in
 
 | Skill | Use it for |
 |---|---|
-| `tweetcraft-dev-pipeline` | **Any change to a userscript.** The measure-twice-cut-once workflow. Start here. |
+| `tweetcraft-dev-pipeline` | **Any change to a userscript.** The measure-twice-cut-once workflow, run as a parallel team of subagents. Start here. |
 | `tweetcraft-game-code` | Finding how the game does something: snapshot, module map, real GLSL, live probing |
 | `tweetcraft-shaders` | The shader mod: GLSL patches, new effects or settings, compile errors, GPU/CPU performance |
 | `tweetcraft-ui` | Menus, settings tabs, keybinds, HUD, a native look and feel |

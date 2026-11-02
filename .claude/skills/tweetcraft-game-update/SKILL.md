@@ -5,6 +5,9 @@ description: Handle a Tweetcraft game update or anything red, such as a "Tweetcr
 
 # The game changed (or a check is red)
 
+A fix that touches more than one file runs as a team, research included: see "Run it as a team" in
+`tweetcraft-dev-pipeline`.
+
 ## How you find out
 
 - **"Tweetcraft changed to build `<id>`" issue:** opened by the `Game watch` workflow on main whenever the

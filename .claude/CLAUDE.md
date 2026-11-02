@@ -16,8 +16,8 @@ as the game updates.
   edit `.claude/settings*.json` yourself. For GitHub API calls, ask the user first.
 - **Hook the game defensively.** Detect, then patch. If the target isn't there, leave the game untouched and fall
   back to the original. A broken game is worse than a missing feature. Code inside the game's frame loop must
-  never throw: `frame()` re-arms `requestAnimationFrame` first, so an exception silently skips rendering and
-  network sends for every frame after it.
+  never throw: `js/frameloop.js` re-arms `requestAnimationFrame` before calling `frame()`, so an exception
+  silently skips rendering and network sends for every frame after it.
 - **Client-side visuals and UX only, never anything that touches fair play or security.** Never touch, automate or
   hide the Turnstile challenge. Never alter the `hello` handshake or protocol version. Never forge or replay
   network traffic (dig, place, movement). Never read or send the `mc.tok`, `mc.admin` or `mc.key.*` secrets.
@@ -61,7 +61,13 @@ Every script change follows the **`tweetcraft-dev-pipeline`** skill:
 5. `userscript-reviewer`.
 6. Hand over for an in-game test.
 
-Don't skip phases. Scale their depth to the change.
+- Don't skip phases. Scale their depth to the change.
+- **Run it as a team (mandatory).** Every non-trivial change (more than one file, or more than a few minutes) runs
+  as parallel subagents. Research fans out to several `game-code-explorer` and Explore agents, then one agent per
+  workstream, with one owner per file. Each brief stands alone and carries the cross-agent contracts. Teammates
+  message each other with SendMessage, after the lead sends them a roster of agent IDs. The lead integrates, runs
+  `userscript-reviewer` and then `npm test`, and hands over. Speed never skips a phase. Details: "Run it as a team"
+  in the skill.
 
 ## Knowledge base
 
@@ -72,7 +78,7 @@ Don't skip phases. Scale their depth to the change.
 
 ## Skills and agents in this repo (use them)
 
-- `tweetcraft-dev-pipeline`: the workflow for any script change (start here)
+- `tweetcraft-dev-pipeline`: the workflow for any script change, run as a parallel team of subagents (start here)
 - `tweetcraft-game-code`: find how the game does something, read its modules and real GLSL, probe it live
 - `tweetcraft-shaders`: any change to the shader script, GLSL patches or rendering performance
 - `tweetcraft-ui`: menus, settings tabs, keybinds, HUD, matching the game's look
@@ -80,9 +86,9 @@ Don't skip phases. Scale their depth to the change.
 - `tweetcraft-game-update`: the game changed, or check/smoke/CI is red
 - Third-party reference skills (vetted, MIT; repo rules win on conflicts): `tampermonkey`, `webgl`
   and `shader-art-coding` (GLSL building blocks). See `.claude/skills/README.md`.
-- Agent `game-code-explorer`: delegate "where/how does the game do X" questions so the 690 KB of game code
-  stays out of your context
-- Agent `userscript-reviewer`: review script changes before they ship
+- Agent `game-code-explorer`: delegate "where/how does the game do X" questions, several in parallel (one question
+  area each), so the 690 KB of game code stays out of your context
+- Agent `userscript-reviewer`: review the full diff of a script change before it ships
 
 Path-scoped rules in `.claude/rules/` load automatically when you touch userscripts, tooling or `game/`.
 
@@ -104,7 +110,6 @@ current scripts, by function and line. Check it before changing a function, and 
 Notable ones:
 - `patchCloud()` never matches (double-escaped regexes), and its inserted `'\\n'` would break GLSL once the regexes
   are fixed. It's marked `known` in `compat/expectations.mjs`.
-- Toggling the `shadows` setting live does nothing until a reload.
 - Better Options scales the HUD hint and the tab player list twice when UI scale isn't 1 (#45).
-- The shaders' K toggle ignores keybind capture.
+- The shaders' K toggle can't be rebound (it isn't registered with `registerKeybind`).
 - Zoom's default `KeyC` collides with the game's undo-preview confirm key.

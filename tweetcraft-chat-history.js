@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweetcraft Chat History
 // @namespace    tweetcraft.twitterentary
-// @version      1.0.0
+// @version      1.0.1
 // @description  Minecraft-style chat history: press Up and Down to recall previously sent messages and commands.
 // @author       Twitterentary
 // @match        https://tweetcraft.jai.vin/*
@@ -68,7 +68,7 @@
   }, true);
 
   addEventListener('keydown', e => {
-    if (e.isComposing) return;
+    if (e.isComposing || e.keyCode === 229) return; // IME composition, same test as the game's chat
     if (!chatOpen()) return;
 
     if (e.key === 'Enter') {

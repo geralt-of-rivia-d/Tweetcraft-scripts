@@ -12,6 +12,8 @@ First decide whether it belongs in an existing script:
 
 ## Steps
 
+A new script touches several files, so it always runs as a team: see "Run it as a team" in `tweetcraft-dev-pipeline`.
+
 1. **Measure.** Use the `tweetcraft-game-code` skill (or the `game-code-explorer` agent) to find the hook points.
    Pick the most stable anchor (export, then DOM id or aria-label, then GLSL uniform, then code shape), and check it
    live with `npm run probe`.

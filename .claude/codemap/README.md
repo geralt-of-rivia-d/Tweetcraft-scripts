@@ -4,7 +4,7 @@ How this repo is laid out, how the pieces relate, and where new things go. Detai
 
 | Map | Covers |
 |---|---|
-| [scripts.md](scripts.md) | Our five userscripts, function by function: hooks, globals, storage, cross-script contracts, known issues |
+| [scripts.md](scripts.md) | Our four userscripts, function by function: hooks, globals, storage, cross-script contracts, known issues |
 | [game-core.md](game-core.md) | The game: modules, boot sequence, main loop, state, world data, networking, storage keys |
 | [game-rendering.md](game-rendering.md) | The game's WebGL2 renderer: frame passes, the 18 shader programs, chunk meshes, lighting, texture units |
 | [game-ui.md](game-ui.md) | The game's screens and menus, CSS units and font, canvas HUD, input and keys |
@@ -64,8 +64,9 @@ they disagree, fix the map.
 Runtime contracts between the scripts:
 - `window.__tcOptions` (Better Options) is used by zoom (keybind, settings tab, `fov`), by any new script's
   settings, and by the `tc.options` storage.
-- `window.Twitterentary` (shaders) has `cfg` and `schema`, which Better Options' Shaders tab reads, plus
-  `tc.shader.<key>` storage.
+- `window.Twitterentary` (shaders) has `cfg`, `schema` and `presets`, which Better Options' Shaders tab reads, and
+  `set`, `applyPreset`, `currentPreset` and `reset`, which it calls. Its settings are stored as `tc.shader.<key>`.
+  The shaders use Better Options' `toast` and `capturing` when they're there.
 - Game-owned storage `mc.fov` and `mc.rd` is read by Better Options and zoom.
 
 ## Where things belong

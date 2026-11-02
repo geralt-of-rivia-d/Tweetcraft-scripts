@@ -5,6 +5,9 @@ description: Change, extend, debug or optimise the Twitterentary shader userscri
 
 # Working on the shader mod
 
+Any non-trivial change runs as a team (see "Run it as a team" in `tweetcraft-dev-pipeline`). Put
+`window.Twitterentary` (`cfg`, `schema`) in every brief, since it's the contract with Better Options.
+
 Read first:
 - `.claude/codemap/scripts.md`: function-by-function map of `twitterentary-shaders.user.js`, including the CFG,
   SCHEMA and uniform table.
@@ -117,19 +120,21 @@ Profile before optimising, and change one thing at a time.
     `cfg.shadows` toggled.
   - `EXT_disjoint_timer_query_webgl2` for GPU pass timing, where the browser exposes it (often it doesn't).
 - **Known costs in this mod (verify, then fix):**
-  - `renderShadow` re-rasterises every in-range chunk into a `shadowSize²` (default 2048²) depth map on each
-    refresh. Cost scales with `shadowExtent²` and chunk count. Prefer fewer or cheaper refreshes (larger
-    `shadowMove` and `shadowEvery`), and use cascades only if needed. Texel snapping is already done, and so is
-    culling chunks outside the light-space extent in X and Y (not in depth).
-  - `renderShadow` also saves and restores GL state with many `gl.getParameter` / `gl.isEnabled` calls per refresh.
-    These can force pipeline syncs; track the state in JS instead.
-  - Shadow filtering does `shadowTaps` PCF taps per terrain fragment. That is the main per-pixel cost: consider
-    fewer taps at distance, or hardware-compare-only at low settings.
-  - Terrain FS extras (`pow`, derivatives, water waves) run on every terrain pixel. Branch on uniforms to skip
-    disabled features, which is cheap and coherent.
-  - The `Array.prototype.indexOf` hook taxes every `indexOf` call in the page forever. Restore the original once
-    the names are captured.
-  - Wrapped `drawElements` and `useProgram` run for every draw call. Keep them allocation-free and branch-light.
+  - `renderShadow` re-rasterises every in-range chunk into a `shadowSize²` depth map (`DEPTH_COMPONENT16`,
+    back-face culled, opaque parts through a depth-only program). Since 1.4.0 it runs only when something changed
+    (`STATS.why`: dirty chunks or settings, camera moved `shadowMove`, sun turned, 2 s safety net), at most every
+    `shadowEvery` frames. Cost scales with `shadowExtent²` and chunk count; the footprint cull is X/Y only and
+    assumes a 128-tall column.
+  - It saves and restores only cheap state (`isEnabled`, bindings, viewport); the depth func and mask are set back
+    to what gfx.js uses for the terrain passes (anchored in `compat/expectations.mjs`). Don't add `getParameter`
+    calls for depth state: they are GPU-process round trips.
+  - Shadow filtering (`shadowFilter`) is 1, 4 (3x3 tent) or 9 (5x5 tent) hardware-PCF taps, all through
+    `textureLod` so ANGLE can skip them in branches. Beyond 32 blocks and on foliage and water it is one tap. It is
+    still the main per-pixel cost.
+  - Terrain FS extras (derivatives, water waves) run on every terrain pixel; fully fogged pixels return early.
+    Branch on uniforms to skip disabled features, which is cheap and coherent.
+  - Wrapped `drawElements` and `useProgram` run for every draw call. Keep them allocation-free and branch-light;
+    uniforms go through the per-program cache in `applyUniforms` / `pushCam`.
 - **Rules of thumb:**
   - Don't call `getError`, `getParameter`, `readPixels` or `getShaderParameter` in per-frame paths.
   - Reuse typed arrays (`SCRATCH`).
