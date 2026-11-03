@@ -49,7 +49,9 @@ Read first:
 3. **Avoid name collisions.** Injected identifiers use the `tc` prefix for locals (`tcC`, `tcDx`) and `u<Name>`
    for uniforms. Grep `shaders/` so a new name doesn't already exist in the game's GLSL.
 4. **Stay valid GLSL ES 3.00 with the game's precision.** Integer and bit ops need `highp` (`aPos` is a `uvec3`
-   packed position). `dFdx`/`dFdy` are core in ES 3.00.
+   packed position). `dFdx`/`dFdy` are core in ES 3.00. Never write the `flat` qualifier in terrain GLSL, not even
+   in a comment: one flat varying costs 2.3-3 GPU ms at rd 12 on ANGLE D3D11, and smoke forbids it. The number of
+   varyings doesn't matter.
 5. **Samplers.** The game uses texture units 0–5 only, and 6 and 7 are ours. A sampler you add to a game shader
    **defaults to unit 0**, where a `sampler2DArray` already sits. That's an `INVALID_OPERATION` on draw unless you
    `uniform1i` it to its unit after link (see `applyUniforms`). `Gfx.tex2d` leaves `TEXTURE1` active, so save and
@@ -85,6 +87,7 @@ npm run smoke -- --only shaders          # compiles and links every patched prog
 npm run probe -- --only shaders --programs
 npm run probe -- --only shaders "window.Twitterentary.debug()"
 npm run probe -- --only shaders "window.Twitterentary.stats"
+npm run cloud -- smoke --only shaders    # the same smoke in GitHub Actions: use it while a bench holds the GPU
 ```
 
 - **Compile, then check effect.** The smoke test fails on any compile or link error, on `console.error` from the
@@ -114,11 +117,10 @@ Before touching a function, read its entries under "Issues & smells" in `.claude
 Profile before optimising, and change one thing at a time.
 
 - **Measuring:**
-  - Chrome DevTools Performance panel (GPU track and main thread).
-  - `chrome://gpu` for the active backend.
-  - Frame time via `requestAnimationFrame` deltas over about 10 seconds, A/B with `Twitterentary.cfg.enabled` and
-    `cfg.shadows` toggled.
-  - `EXT_disjoint_timer_query_webgl2` for GPU pass timing, where the browser exposes it (often it doesn't).
+  - Frame-time numbers come from `npm run bench` on the real GPU, run as in "Benchmark smart" below. Nothing else
+    counts as a performance claim.
+  - To find out *where* the time goes: Chrome DevTools Performance panel (GPU track and main thread),
+    `chrome://gpu` for the active backend, and `Twitterentary.perf` (per-frame GPU timer samples).
 - **Known costs in this mod (verify, then fix):**
   - `renderShadow` re-rasterises every in-range chunk into a `shadowSize²` depth map (`DEPTH_COMPONENT16`,
     back-face culled, opaque parts through a depth-only program). Since 1.4.0 it runs only when something changed
@@ -141,10 +143,79 @@ Profile before optimising, and change one thing at a time.
   - Avoid redundant uniform uploads (the `gen` check).
   - Never allocate in hot paths.
 
+## Benchmark smart
+
+Real-GPU time is the slowest part of the loop, and this laptop is noisy and throttles. A decision should take one
+or two bench runs, not five. Before any bench:
+
+1. **Read what is already known.**
+   - `.claude/codemap/machine-profile.md`: the backend (§1), the noise floor (§2), thermal and background load (§3),
+     the cost table (§4), presets (§5), the protocols and their wall time (§6), first guesses per goal (§7) and
+     gotchas (§8). Its data is `tools/lib/machine-profile.json`.
+   - `.claude/codemap/optimisation-log.md`: every past optimisation and what it gained (§1), how this GPU behaves
+     (§2), the benchmarking mistakes and the rule against each (§3), the dead ends (§4) and the next likely wins (§5).
+2. **Look for an existing answer.** `npm run bench:history -- --scenario "high*" --rd 12 --fov 80 --latest` lists
+   that row from every saved report (filters: `--version`, `--label`, `--since`, `--vsync`/`--uncapped`; `--md`
+   for a table to paste). If a row with the same script version and settings exists, and nothing on its path
+   changed since, quote it instead of re-running. Its flags column marks rows not to trust: `U` unreliable pass,
+   `P!` preflight warned.
+3. **Predict the result** from the cost table (profile §4, and "Where the cost is" in log §2) and write the
+   prediction down. Start from the profile's first guess (§7) for the goal. A result far off it is as often a
+   measurement problem (throttling, wrong rd/FOV, a background process) as a real effect: check `env`, the guard
+   and the `view` WARNs before believing it.
+4. **One protocol per decision.** Don't mix protocols, or settings, inside one comparison.
+   - `--protocol screen` to choose between candidates: one short pass with the title camera's wait fast-forwarded
+     (`--warp`), about 33 s a row (4 rows ≈ 2.5 min). Enough to rank them on median and `gpuMs`; it can't judge
+     a p95. Judge "holds 60" only from accept, never from a screen.
+   - `--protocol accept --label <name>` once, for the release numbers at the standard (rd 12, FOV 80,
+     1920×1080): up to 3 passes, then a vsync pass written to `bench-<name>-vsync.json`. A row whose verdict is
+     clear after pass 1 keeps that pass, and only the unsettled rows (plus vanilla) run on. 8 rows take about
+     5-16 min, plus about 15 min for the vsync pass, against about an hour before. These JSONs are what the
+     handover quotes. For a small A/B delta (under ~0.4 ms median) add `--no-early-stop`.
+   - Values come from the profile; explicit flags (`--seconds`, `--repeat`, `--cooldown`, `--warp 1`...) still win.
+     Without `--protocol` the bench measures exactly as before.
+   - There is no interleaved mode: passes already alternate their order, so slow drift hits A and B alike. Put A
+     and B in the same run.
+   - Plan the baseline's rows (`--ref origin/main`) to match the candidate's, so `--compare` has a row for each.
+5. **Bench a pinned copy.** `--script <scratchpad>/v-x.user.js`, not the shared working tree, which teammates are
+   editing. Accept only on a frozen tree.
+6. **Trust the preflight.** It runs by default on headed real-GPU runs: AC power, the power plan, background CPU,
+   the GPU lock and the display mode, then a vanilla calibration against the profile's range (with a protocol it
+   cools down and recalibrates once). If it still warns, fix the machine or wait; don't read the numbers.
+   `--strict` makes it exit 1 instead, which suits an unattended accept run.
+7. **Leave the machine alone while it runs.** The GPU lock only serialises browsers: no local smoke, probe or
+   snapshot, and no CPU-heavy node work (simulators, builds) either. Run check and smoke in the cloud instead
+   (`npm run cloud -- test`, see "Testing" in `tweetcraft-dev-pipeline`).
+
+```sh
+npm run bench:history -- --scenario "high*" --rd 12 --fov 80 --uncapped --latest
+npm run bench -- --protocol screen --script <copy> --scenarios vanilla,high+renderScale=1,high+renderScale=1+shadowRes=1024 --label scr-shadowres
+npm run bench -- --protocol accept --script <copy> --scenarios vanilla,off,low,medium,high,ultra,high-moving,ultra-moving --label final-1.5b --compare reports/bench-baseline-1.4.0-rd12.json
+```
+
+Reading the result:
+- **Deltas under the noise floor (profile §2) are noise.** Report "no measurable change" and move on. Don't
+  iterate on them. Decide on median and `gpuMs`, the steadiest metrics; `p95gb` is the noisiest.
+- **Check the row before the number:** no UNRELIABLE pass, vanilla in its usual range, no "system CPU" note, `view`
+  matches the settings, and `gpuSource` is "script per frame" with `gpuFrames` ≈ `frames` before you read GPU ms.
+- **Validate a new metric** on vanilla, on `--raw` frames and under `--vsync` before optimising for it: a tail
+  has to exist at 60 Hz to matter.
+- **Correlation isn't cause.** Before building on one, prove it with a causal A/B: both variants as rows of one
+  run, 3 passes, `--no-early-stop`.
+- **Simulators and synthetic load screen, they don't accept.** Calibrate synthetic load against real play (the old
+  `-moving` forced 1000+ redraws/min against a real 60-300), and take one real `--vsync` run before accepting
+  anything a simulator (govsim) approved.
+- **The title screen is a lower bound** on in-world cost (no walking, no meshing). Confirm in game.
+- **Don't retry a dead end** (log §4), unless the reason it failed no longer holds. Say why.
+- **Feed the knowledge back.** After an accept run, add the result to the optimisation log, and regenerate the
+  machine profile from the reports (profile §9), so the next prediction is better.
+
 ## Done means
 
-- `npm test` passes.
+- `npm run cloud -- test` passes (`npm test` if the cloud is unavailable).
 - Expectations are updated: `source` anchors on `shaders:vs` / `shaders:fs`, `shaders` markers and `min`.
 - `@version` is bumped.
 - `window.Twitterentary` and the SCHEMA stay backwards compatible, because Better Options reads them.
 - Real-Chrome check done or explicitly handed to the user.
+- For a performance change: one `--protocol accept` bench JSON at the standard, quoted with its `env`, and an
+  entry in `.claude/codemap/optimisation-log.md`.

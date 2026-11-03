@@ -86,7 +86,13 @@ try {
   for (const e of shaders.filter(applies)) {
     const pool = programs.filter(p => labelProgram(p) === e.kind);
     const hit = pool.filter(p => p.linked && (p[e.stage]?.source || '').includes(e.marker)).length;
-    settle(e, hit >= e.min, `${hit}/${pool.length} ${e.kind} programs (expected at least ${e.min})`);
+    // min: the marker must appear in at least that many programs; max (optional): at most that many (max: 0 forbids it)
+    if (typeof e.min !== 'number' && typeof e.max !== 'number') { settle(e, false, 'entry has neither min nor max'); continue; }
+    // a max-only entry must still find programs of its kind, or it would pass on an empty pool
+    if (typeof e.min !== 'number' && !pool.length) { settle(e, false, `no ${e.kind} programs to check`); continue; }
+    const min = e.min ?? 0, max = e.max ?? Infinity;
+    settle(e, hit >= min && hit <= max,
+      `${hit}/${pool.length} ${e.kind} programs (expected ${max === Infinity ? `at least ${min}` : min ? `${min}-${max}` : `at most ${max}`})`);
   }
   // Each check gets a time limit, so one that never settles fails on its own instead of running the CI
   // job into its timeout (which would also lose this run's report).

@@ -14,6 +14,9 @@ A fix that touches more than one file runs as a team, research included: see "Ru
   game's code changes, even when nothing breaks. It has the check and smoke results per target, the change
   report, and **the codemaps that mention changed files**. Close it once those maps are re-verified.
 - **A red `Game watch` run:** GitHub emails the repo owner.
+- **Triage first with `npm run cloud -- status`** (read only): the last runs on main and `ci/*`, the open
+  "Tweetcraft changed" and "Upstream has new commits" issues, and stale `ci/*` branches (`--prune` deletes them). A red step on main next to a green `ci/*` run of the same code
+  usually points at the game or the network, not at our change.
 - **`npm run check` warns that a codemap is behind the latest build:** the game moved on since the map was verified.
 - **"Upstream has new commits" issue:** AndresTube's original repo changed, and may contain its own fix for a
   game update. Run `git fetch upstream && git log --stat main..upstream/main`. Merge or cherry-pick what's
@@ -33,7 +36,8 @@ npm run snapshot -- --target staging   # staging often gets the update first
 - **Line-level detail:** `game/prod/$(cat game/prod/LATEST)/changes.diff` (pretty JS, CSS and GLSL). For a CI run,
   the `report-<target>` artifact has `changes-<target>.diff`, `smoke-<target>.json` and the screenshot.
 - **If nothing changed and it's still red:** look for flakiness or the environment (network, the game being down,
-  Chrome changes). Re-run before "fixing" anything.
+  Chrome changes). Re-run before "fixing" anything: `npm run cloud -- test` runs the same workflow on your working
+  tree, so a CI-only failure reproduces in CI.
 
 ## 2. See what broke
 
@@ -57,7 +61,9 @@ For a big diff, delegate the investigation to the `game-code-explorer` agent: "I
   Keep fallbacks.
 - Update `compat/expectations.mjs` to the new anchor, plus `min` counts in `shaders` if the program set changed
   (the smoke output shows the new counts).
-- Re-run `npm test` until green. Check `reports/smoke-prod.png` looks right.
+- Re-run `npm test` until green. Check `reports/smoke-prod.png` looks right. While iterating on one anchor,
+  `npm run check` and `npm run smoke -- --only <script>` locally are fastest; for the full prod and staging run use
+  `npm run cloud -- test --target both` (see "Testing" in `tweetcraft-dev-pipeline`).
 - Bump `@version` (patch) for each script you fixed.
 
 ## 4. Keep the knowledge current

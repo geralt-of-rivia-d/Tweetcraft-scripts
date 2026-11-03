@@ -5,13 +5,26 @@
 # with the change report and the codemaps to re-verify. Each run's summary shows what changed, and the
 # "report-<target>" artifact has the smoke screenshot, results and the full diff.
 # The daily run also opens an issue when the original repo (AndresTube/tweetcraft-scripts) has new commits.
+# Pushes to ci/** come from `npm run cloud` (tools/cloud.mjs): a throwaway snapshot of a local working tree.
+# They run the same checks, never open issues and never save the snapshot cache. Their commit message may
+# carry "[tc-cloud target=prod|staging]", "[tc-cloud skip=check|smoke]" and "[tc-cloud only=<script>]".
 name: Game watch
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'ci/**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Which game to check
+        type: choice
+        options: [both, prod, staging]
+        default: both
+      only:
+        description: Smoke-test only this script (file name); blank for all
+        type: string
+        default: ''
   schedule:
     - cron: '23 7 * * *' # daily at 07:23 UTC
 
@@ -19,8 +32,9 @@ concurrency:
   # One group per event type, so a push never cancels the daily run (or the other way round). Pushes get
   # one group per commit: GitHub cancels a *pending* run when a newer one queues in the same group, and
   # each push's version check only covers that push's own commits, so none may be skipped.
-  group: game-watch-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # ci/** (npm run cloud) gets one group per branch, and a newer push to it cancels the older run.
+  group: game-watch-${{ startsWith(github.ref, 'refs/heads/ci/') && format('ci-{0}', github.ref_name) || format('{0}-{1}', github.event_name, github.event_name == 'push' && github.sha || github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || startsWith(github.ref, 'refs/heads/ci/') }}
 
 permissions:
   contents: read
@@ -33,7 +47,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [prod, staging]
+        # Both, unless a manual run or an npm run cloud push asks for one.
+        target: >-
+          ${{ fromJSON(
+          (github.event_name == 'workflow_dispatch' && inputs.target == 'prod' && '["prod"]') ||
+          (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && '["staging"]') ||
+          (startsWith(github.ref, 'refs/heads/ci/') && contains(github.event.head_commit.message, '[tc-cloud target=prod]') && '["prod"]') ||
+          (startsWith(github.ref, 'refs/heads/ci/') && contains(github.event.head_commit.message, '[tc-cloud target=staging]') && '["staging"]') ||
+          '["prod","staging"]') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -48,7 +69,15 @@ jobs:
 
       # Keep earlier snapshots between runs so each run can report what changed in the game.
       # (Only saved when the job passes, so a breaking update keeps being reported until it's fixed.)
+      # ci/** runs (npm run cloud) only restore it: a work-in-progress run must not become the baseline.
       - uses: actions/cache@v4
+        if: ${{ !startsWith(github.ref, 'refs/heads/ci/') }}
+        with:
+          path: game/${{ matrix.target }}
+          key: game-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: game-${{ matrix.target }}-
+      - uses: actions/cache/restore@v4
+        if: ${{ startsWith(github.ref, 'refs/heads/ci/') }}
         with:
           path: game/${{ matrix.target }}
           key: game-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -61,18 +90,26 @@ jobs:
 
       - name: Static checks
         id: check
+        if: ${{ !(startsWith(github.ref, 'refs/heads/ci/') && contains(github.event.head_commit.message, '[tc-cloud skip=check]')) }}
         env:
-          # "Published" for the version check: the PR's base branch, or main as it was before this push.
-          TC_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'push' && github.event.before || '' }}
+          # "Published" for the version check: the PR's base branch, origin/main for ci/** (like a local
+          # npm run check), or main as it was before this push.
+          TC_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || startsWith(github.ref, 'refs/heads/ci/') && 'origin/main' || github.event_name == 'push' && github.event.before || '' }}
         run: npm run check -- --target ${{ matrix.target }}
 
       # Step time limits fail just that step, so the results below still get recorded and uploaded
       # (a job that hits its own timeout counts as cancelled and would lose them).
       - name: Smoke test in Chrome
         id: smoke
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && !(startsWith(github.ref, 'refs/heads/ci/') && contains(github.event.head_commit.message, '[tc-cloud skip=smoke]')) }}
         timeout-minutes: 8
-        run: npm run smoke -- --target ${{ matrix.target }}
+        env:
+          ONLY_INPUT: ${{ inputs.only }}
+          CLOUD_MSG: ${{ startsWith(github.ref, 'refs/heads/ci/') && github.event.head_commit.message || '' }}
+        run: |
+          only="$ONLY_INPUT"
+          [ -n "$only" ] || only=$(printf '%s\n' "$CLOUD_MSG" | sed -n 's/.*\[tc-cloud only=\([^]]*\)\].*/\1/p' | head -n 1)
+          npm run smoke -- --target ${{ matrix.target }} ${only:+--only "$only"}
 
       - name: Record results for the notify job
         if: ${{ always() }}
@@ -158,7 +195,7 @@ jobs:
   # Daily: has the original repo got commits we don't (e.g. its own fixes for a new game version)?
   upstream:
     name: upstream
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !startsWith(github.ref, 'refs/heads/ci/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

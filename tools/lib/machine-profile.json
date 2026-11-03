@@ -1,0 +1,602 @@
+{
+  "schema": 1,
+  "machine": {
+    "gpu": "Intel(R) UHD Graphics 620",
+    "cpu": "Intel(R) Core(TM) i7-8650U CPU @ 1.90GHz",
+    "angle": "d3d11",
+    "chrome": "156.0.8078.80",
+    "os": "win32 10.0.26300",
+    "panel_hz": 60,
+    "note": "Laptop, 4C/8T. EXT_disjoint_timer_query_webgl2 is exposed on d3d11, gl and vulkan; TIMESTAMP_EXT has 0 bits, so GPU times come from TIME_ELAPSED (results arrive 0.25-1.5 s late). Uncapped blank page 1000-2750 FPS."
+  },
+  "updated": "2026-11-03",
+  "data_up_to": "2026-11-03T17:05:00Z",
+  "sources": [
+    "reports/bench-baseline-1.4.0-rd12.json",
+    "reports/bench-final-1.5.json",
+    "reports/bench-final-1.5-native.json",
+    "reports/bench-final-1.5-secondary.json",
+    "reports/bench-sh5-v7.json",
+    "reports/bench-sh5-medium.json",
+    "reports/bench-sh5-secondary.json",
+    "reports/bench-bench4-vsync-check.json",
+    "reports/bench-lab2-breakdown-rd12.json",
+    "reports/bench-lab2-breakdown-rd8.json",
+    "reports/bench-lab2-low-retest.json",
+    "reports/bench-lab2-raw1.json",
+    "reports/bench-lab2-var-*.json",
+    "reports/bench-sh4-*.json",
+    "reports/bench-early-1.5-rd12*.json",
+    "reports/bench-baseline-1.4.0.json",
+    "reports/bench-repeat-d3d11.json",
+    "reports/bench-diag-1.4.0-raw.json",
+    "reports/bench-size-540.json",
+    "reports/bench-angle-gl.json",
+    "reports/bench-angle-vulkan.json",
+    "reports/bench-sh-rc2.json",
+    "reports/bench-sh-rc3.json",
+    "reports/bench-sh2-a-final.json",
+    "reports/bench-devloop-warp-ab.json",
+    "~/.claude/plans/shaders-team/handover-SH5.md (vsync traces, not bench reports)"
+  ],
+  "excluded": {
+    "reports/bench-bench3-verify.json": "SwiftShader smokes ran alongside (sysCpu 74-100%); view evidence only",
+    "reports/bench-bench3-fs-window.json": "same contamination (vanilla 5.8-8.5)",
+    "reports/bench-bench3-fs-full.json": "invalid canvas 1904x985",
+    "reports/bench-bench3-fs-full2.json, bench-bench3-fs-window2.json": "--at 20 (different yaw: vanilla 3.9-4.2), not comparable to --at 40",
+    "reports/bench-sh4-sh7.json renderScale=1 rows": "outside CPU load (+1.8-2.6 ms med vs bench-sh4-sh7b while vanilla matched)",
+    "reports/bench-sh2-a-final.json": "pass 1 sysCpu 83%, vanilla med spread 62%",
+    "reports/bench-baseline-1.4.0-unaligned.json": "rows at different yaws",
+    "reports/bench-trial1.json, bench-diag-raw.json, bench-diag-540.json": "early tooling, no yaw alignment",
+    "reports/bench-sh-rc2.json GPU ms": "gpuSource 'script mean' (ring of 8 queries), unreliable",
+    "reports/bench-sh5-secondary.json vanilla@rd=10": "5.4 vs 4.2 in final-1.5-secondary; run interrupted by the user",
+    "reports/bench-devloop-verify.json": "contaminated: vanilla med 5.2-6.7 at sysCpu 51-77% (other agents); flagged by preflight and the guard",
+    "reports/bench-devloop-verify-vsync.json": "vsync child pass of the same contaminated devloop-verify run (other agents loading the CPU: vanilla 6.2-6.7 ms, sysCpu 71-77%)"
+  },
+  "standard": {
+    "rd": 12,
+    "fov": 80,
+    "w": 1920,
+    "h": 1080,
+    "at": 40
+  },
+  "vanilla": {
+    "med": [
+      4.4,
+      5
+    ],
+    "p95gb": [
+      6.4,
+      8.5
+    ],
+    "p95gb2": [
+      7.07,
+      7.3
+    ],
+    "gpuMs": [
+      4.39,
+      5.17
+    ],
+    "sysCpuPct": [
+      42,
+      50
+    ],
+    "typical": {
+      "med": 4.7,
+      "p95gb": 7.4,
+      "p95gb2": 7.2,
+      "gpuMs": 4.76
+    },
+    "warn_if": {
+      "med_gt": 5,
+      "p95gb_gt": 8.5,
+      "sysCpuPct_gt": 55
+    },
+    "abort_if": {
+      "med_gt": 5.5,
+      "p95gb_gt": 10
+    },
+    "n_passes": 25,
+    "other_settings": {
+      "rd8_fov80": {
+        "med": [
+          3.3,
+          3.5
+        ],
+        "p95gb2": 5.4,
+        "gpuMs": [
+          3.57,
+          3.83
+        ]
+      },
+      "rd10_fov80": {
+        "med": 4.2,
+        "gpuMs": 4.17,
+        "src": "bench-final-1.5-secondary.json (sh5-secondary's 5.4 is an outlier)"
+      },
+      "rd12_fov70": {
+        "med": 4.7,
+        "gpuMs": [
+          4.84,
+          4.93
+        ]
+      },
+      "rd12_fov110": {
+        "med": [
+          5.1,
+          5.3
+        ],
+        "gpuMs": [
+          5.03,
+          5.4
+        ]
+      },
+      "rd8_fov70_old_standard": {
+        "med": [
+          3.4,
+          3.8
+        ],
+        "gpuMs": [
+          3.47,
+          4.28
+        ],
+        "src": "11-02 reports"
+      },
+      "at20": {
+        "med": [
+          3.9,
+          4.2
+        ],
+        "src": "bench-bench3-fs-full2.json, bench-bench3-fs-window2.json: another yaw, never mix with --at 40"
+      }
+    },
+    "note": "Clean passes from 21 rd-12 reports, 11-03 11:00-16:15 UTC. Contaminated passes read med 5.2-8.7 / p95gb 9.0-16.6, and every one had sysCpuPct >= 58. Vanilla can miss contamination of heavy rows (bench-sh4-sh7), so also check each row's sysCpuPct: clean heavy rows read 33-48."
+  },
+  "noise": {
+    "med_pct": 1.8,
+    "p95gb2_pct": 2,
+    "gpuMs_pct": 2.6,
+    "p95gb_pct": 8,
+    "per_pass_sd_ms": {
+      "vanilla": {
+        "med": 0.18,
+        "gpuMs": 0.22,
+        "p95gb": 0.61,
+        "p95gb2": 0.12
+      },
+      "fixed_scale_rows": {
+        "med": 0.21,
+        "gpuMs": 0.34,
+        "p95gb": 1.36
+      },
+      "auto_scale_rows": {
+        "med": 0.28,
+        "gpuMs": 0.54,
+        "p95gb": 2.45,
+        "p95gb2": 0.29
+      }
+    },
+    "real_delta_ms": {
+      "same_run_1pass": {
+        "med": 0.6,
+        "gpuMs": 0.9,
+        "p95gb2": 1,
+        "p95gb": 3
+      },
+      "same_run_3pass": {
+        "med": 0.4,
+        "gpuMs": 0.6,
+        "p95gb2": 0.7,
+        "p95gb": 2
+      },
+      "across_reports_fixed_scale": {
+        "med": 0.5,
+        "gpuMs": 0.5,
+        "src": "high@rd=8 med 10.2-10.3 / gpu 10.37-10.71 over 5 reports; ultra@rd=8 10.5-10.8 / 10.79-11.24 over 3"
+      },
+      "across_reports_auto": {
+        "med": 0.8,
+        "p95gb": 2.6,
+        "src": "bench-sh4-final2 (1 pass) vs bench-final-1.5 (3 passes), same build: med Δ 0.1-0.7, p95gb Δ 1.2-2.6"
+      }
+    },
+    "best_discriminator": "med and gpuMs on fixed-renderScale rows (cost questions). For holds-60 verdicts use p95gb2, never p95gb: the same row's p95gb ranged 4.5 ms across reports (high@rd=8 12.7-17.2) and p95gb2 removes most of it (ultra@rd=8 p95gb 18.5 -> p95gb2 12.3). Auto rows add governor noise: med moves 0.6-0.7 ms when the governor lands at 1.0 instead of 0.9 (bench-sh5-v7 medium vs bench-sh5-medium).",
+    "seconds_effect": "From per-frame data (bench-lab2-raw1.json, rd 12), 4-s windows already give med SD <= 0.2 and gpu SD <= 0.15 within a run, below the 0.2-0.34 pass-to-pass SD. Longer windows only tame the p95 tail, which is bursty (one 2-s window of high@1 read p95gb2 24.6 vs 16-17).",
+    "verdict_flips": "5 of 74 single passes (rd 12, 3-pass reports) gave another holds-60 verdict than their row's median: all on p95, never on med. Their combined p95gb margins were -0.75, +2.74, -0.30, +1.02, +1.12 ms.",
+    "note": "_pct = one-pass SD relative to a typical preset row (med ~12, gpu ~13, p95gb2 ~15). A delta below 2 SD (real_delta_ms) is noise."
+  },
+  "thermal": {
+    "throttle_after_min": null,
+    "cooldown_s": 30,
+    "drift_within_run_ms": 0.3,
+    "signature": "No GPU-thermal throttling was seen: over ~5 h of near-continuous GPU load on 11-03, vanilla stayed at 4.4-5.0 ms med with no trend. Every flagged or slow pass was background CPU load: sysCpuPct >= 58 (lead's govsim, SwiftShader smokes, 83% in bench-sh2-a-final). --cooldown 60 did not prevent it (bench-final-1.5 and -native pass 1 were both flagged). With cooldown 0, bench-sh5-medium crept +0.3 ms (vanilla 4.6/4.8/4.9).",
+    "detect_early": "Preflight: vanilla med > 5.0 or p95gb > 8.5 or sysCpuPct > 55 = bad state. Per row: sysCpuPct > 50 on a heavy row (normal 33-48) = suspect, even when vanilla looks fine.",
+    "why_cooldown": "30 s is cheap insurance against the +0.3 ms creep. The data shows no benefit from 60 s."
+  },
+  "wall_time": {
+    "per_scenario_s": [
+      51,
+      53
+    ],
+    "per_scenario_s_warp10": [
+      29,
+      33
+    ],
+    "warp_check": "reports/bench-devloop-warp-ab.json (warp 10, settle 12, 5 s, interleaved): vanilla warped 4.75 (gpu 4.75) vs legacy 4.5 (4.47); high 11.9 (12.40) vs 12.0 (12.35); every row at clock 40.0-40.1. All deltas within 1-pass noise, so warped rows are comparable with --at 40 reports; no separate vanilla range needed",
+    "model": "per scenario ~ at + seconds + 3-5 s (boot, steady and warm-up overlap the camera wait); total ~ scenarios x passes x 52 s + passes x cooldown + ~10 s browser start",
+    "where_it_goes": "About 75% of each scenario is the wait for the title camera to reach --at 40 s of game time. --seconds 8 -> 5 saves only ~3 s (6%). Runs at --at 20 took 29-32 s per scenario, and at --at ~8 they took 15-17 s, but that is another view (vanilla 3.9-4.2 vs 4.7). A steady wait longer than ~35 s pushes a row past 53 s: angle-gl high took 81 s.",
+    "examples": {
+      "accept 8 scenarios x 3 passes, cooldown 30": "~22.5 min",
+      "accept 8 x 3, cooldown 60 (bench-final-1.5)": "~24 min (BENCH3 quoted ~30 with startup)",
+      "screen 4 scenarios x 1": "~3.5 min",
+      "vsync 8 x 2 at 30 s, cooldown 30": "~20 min"
+    }
+  },
+  "protocol": {
+    "screen": {
+      "seconds": 5,
+      "warmup": 2,
+      "repeat": 1,
+      "cooldown": 0,
+      "at": 40,
+      "warp": 10,
+      "settle": 12,
+      "why": "For A/B cost questions on med/gpuMs. 4-5 s windows give med/gpu SD <= 0.2, so a 1-pass Δ above 0.6 ms med or 0.9 ms GPU is real (same run). Keep fixed renderScale on the rows being compared (Auto adds 0.6-0.7 ms governor noise). Never judge holds-60 from a screen run."
+    },
+    "accept": {
+      "seconds": 8,
+      "warmup": 2,
+      "repeat": 3,
+      "cooldown": 30,
+      "at": 40,
+      "warp": 10,
+      "settle": 12,
+      "guard": 25,
+      "vsync_seconds": 30,
+      "vsync_repeat": 2,
+      "adaptive": "After pass 1, a row's verdict is settled when |p95gb2 - 16.7| >= 2.0 and |med - 14| >= 0.8. Rows inside those margins need passes 2-3. Under vsync: settled when miss% < 0.5 or > 1.5; otherwise rerun at 60 s.",
+      "why": "3 passes because 5/74 single passes flipped the p95 verdict and Auto p95gb moved 1.2-2.6 ms between a 1-pass and a 3-pass run of the same build. Vsync needs >= 30 s: at 8 s one frame is 0.21 pp of miss% (bench-bench4-vsync-check failed by 0.05 pp), at 30 s it is 0.056 pp. SH5 used 40-s rows. The guard can't see throttling under vsync, so run it uncapped first."
+    }
+  },
+  "costs_ms": {
+    "vanilla_gpu": {
+      "rd12": 4.76,
+      "rd10": 4.17,
+      "rd8": 3.6,
+      "src": "vanilla passes, see vanilla.note; bench-final-1.5-secondary.json; bench-sh5-secondary.json"
+    },
+    "off_tax_current": {
+      "rd12": 0.2,
+      "rd8": null,
+      "range_rd12": [
+        0.07,
+        0.42
+      ],
+      "src": "bench-sh5-v7 off 5.06 vs vanilla 4.86; bench-final-1.5 5.03/4.96; bench-sh4-final 4.81/4.39"
+    },
+    "off_tax_flat_varying_era": {
+      "rd12": 3.04,
+      "rd8": 1.08,
+      "src": "bench-lab2-breakdown-rd12 off 8.21 vs 5.17; bench-lab2-breakdown-rd8 4.91 vs 3.83. Per-primitive (ANGLE geometry shader for a flat varying). Fixed by vs3: off 5.18 (bench-lab2-var-sh-vs3) vs 7.36-7.86 (vs1/vs2)"
+    },
+    "effects_no_shadows": {
+      "rd12": 6,
+      "rd8": null,
+      "rd12_base_gov1": 4.31,
+      "rd8_base_gov1": 4.48,
+      "src": "low (scale 1) - off: bench-sh5-v7 11.07-5.06; bench-final-1.5-native low@1 11.37 - bench-final-1.5 off 5.03 = 6.34. base-gov1: bench-lab2-breakdown-rd12/-rd8. Per-pixel: flat across rd"
+    },
+    "shadows": {
+      "rd12": 2.1,
+      "rd8": 1.6,
+      "src": "bench-final-1.5-native medium@1 13.51 - low@1 11.37 (3 passes); base-gov1: high@1 14.31 vs high@1+shadows=false 12.37 (bench-lab2-low-retest) = 1.94 at rd12, high@1 10.99 - low@1 9.39 = 1.60 at rd8"
+    },
+    "high_over_medium": {
+      "rd12": 0.53,
+      "rd8": null,
+      "src": "bench-final-1.5-native high@1 14.04 vs medium@1 13.51 (within the 3-pass 0.6 noise)"
+    },
+    "ultra_over_high": {
+      "rd12": -0.43,
+      "rd8": 0.5,
+      "src": "bench-final-1.5-native 13.61 vs 14.04 (noise); rd8: bench-sh5-secondary 11.24 vs 10.71, bench-final-1.5-secondary 11.20 vs 10.70"
+    },
+    "shadowFilter=0": {
+      "rd12": 0.29,
+      "rd8_1.4.0": -1.96,
+      "src": "bench-lab2-breakdown-rd12 (noise, med -0.3); 1.4.0 rd8/fov70 bench-baseline-1.4.0 high 15.88 -> 13.92 (med -0.9)"
+    },
+    "shadowFilter=2": {
+      "rd12": 0.69,
+      "rd8_1.4.0": -0.8,
+      "src": "bench-lab2-breakdown-rd12 (med +0.3); bench-baseline-1.4.0"
+    },
+    "shadowCascades=false": {
+      "rd12": 0.1,
+      "rd8": null,
+      "src": "bench-lab2-breakdown-rd12 (med -0.2; redraws 30 -> 15/min)"
+    },
+    "shadowSize=1024": {
+      "rd12": 0.48,
+      "src": "bench-lab2-breakdown-rd12 (noise; the row also logged a game error)"
+    },
+    "shadowSize=4096": {
+      "rd12": 2.11,
+      "src": "bench-lab2-breakdown-rd12: med +0.6, p95gb +11.3 (29.2)"
+    },
+    "waterEffects=false": {
+      "rd12": 0.36,
+      "rd8_1.4.0": -0.42,
+      "src": "bench-lab2-breakdown-rd12 (noise); bench-baseline-1.4.0"
+    },
+    "waving=false": {
+      "rd12": 0.84,
+      "rd8_1.4.0": -0.33,
+      "src": "bench-lab2-breakdown-rd12 (noise, sign wrong); bench-baseline-1.4.0"
+    },
+    "skyEffects=false": {
+      "rd12": 0,
+      "rd8_1.4.0": -1.32,
+      "src": "bench-lab2-breakdown-rd12; bench-baseline-1.4.0 (med -1.0)"
+    },
+    "renderScale_1_to_0.9": {
+      "rd12": -0.32,
+      "rd12_current_medium": -1.3,
+      "src": "bench-early-1.5-rd12-fixed high@1 13.64 vs @0.9 13.32; current: bench-final-1.5-native medium@1 13.51 vs bench-sh5-medium medium@0.9 12.28 (cross-report)"
+    },
+    "renderScale_1_to_0.7": {
+      "rd12": -3.04,
+      "rd12_alt": -2.04,
+      "src": "bench-lab2-raw1 high 14.26 -> 11.22; bench-lab2-breakdown-rd12 14.31 -> 12.27"
+    },
+    "renderScale_1_to_0.6": {
+      "rd12": -3.89,
+      "rd8": -3.68,
+      "src": "base-gov1 high: 14.31 (breakdown-rd12) -> 10.42 (breakdown-rd8's rd12 row); rd8 10.99 -> 7.31"
+    },
+    "rd_step_high_scale1": {
+      "rd8": 10.7,
+      "rd10": 12.5,
+      "rd12": 14.04,
+      "per_rd_unit": 0.84,
+      "src": "bench-sh5-secondary / bench-final-1.5-secondary high@rd=8 10.70-10.71, high@rd=10 12.39-12.63, bench-final-1.5-native high@1 14.04"
+    },
+    "fov110_vs_80": {
+      "vanilla": 0.4,
+      "ultra_scale1": -1.5,
+      "high_scale1": -0.47,
+      "src": "vanilla 5.03-5.40 vs 4.76; ultra@fov=110 at scale 1 11.71-12.11 (bench-sh4-final, -final2, bench-final-1.5-secondary) vs ultra@1 13.19-13.61; high@fov=110 12.10 vs high@1 12.57 (bench-sh4-sh7b). More sky, fewer terrain pixels on the title view: wide FOV is NOT the worst case for the script"
+    },
+    "fov70_vs_80": {
+      "vanilla": 0.1,
+      "high": 0.5,
+      "src": "bench-sh4-sh7b high@fov=70 13.76 at scale 0.94 vs high 13.26 at 1.00; vanilla 4.84-4.93"
+    },
+    "heldLight_off": {
+      "rd12": null,
+      "src": "inert on the title screen (nothing held); the only row (bench-bench3-verify) is contaminated"
+    },
+    "shadow_redraws_moving": {
+      "rd12": -0.19,
+      "src": "bench-final-1.5 high-moving (127/min) 12.36 vs high (15/min) 12.55: ~0 at real movement rates. Old -moving (~1250/min, now -stress), rd8: +1.3 (bench-sh-rc3 high@1 11.04 -> 12.34)"
+    },
+    "pixels_540p_1.4.0": {
+      "rd8_fov70": -9.12,
+      "src": "bench-size-540 high gpu 6.76 vs bench-baseline-1.4.0 15.88 (med 13.4 -> 5.0): 1.4.0 was fragment-bound"
+    },
+    "v1.4.0_to_1.5_high_scale1": {
+      "rd12": -1.68,
+      "src": "bench-baseline-1.4.0-rd12 high 15.72 (med 15.3) -> bench-final-1.5-native high@1 14.04 (med 12.9)"
+    },
+    "angle_backend_1.4.0_high_mean_ms": {
+      "d3d11": 16.58,
+      "gl": 12.58,
+      "vulkan": 11.32,
+      "src": "bench-baseline-1.4.0 / bench-angle-gl / bench-angle-vulkan (rd8/fov70; mean ms only, gl/vulkan medians are meaningless). Before the flat-varying fix; current gap unknown"
+    }
+  },
+  "presets": {
+    "low": {
+      "med": 10.4,
+      "p95gb": 14,
+      "p95gb2": 13.73,
+      "gpuMs": 11.07,
+      "scale": 1,
+      "holds60": true,
+      "passes": 1,
+      "version": "1.5.0-wip (SH5 v-final)",
+      "src": "bench-sh5-v7.json"
+    },
+    "medium": {
+      "med": 11.5,
+      "p95gb": 15.46,
+      "p95gb2": 15.1,
+      "gpuMs": 12.11,
+      "scale": 0.89,
+      "holds60": true,
+      "passes": 3,
+      "version": "1.5.0-wip (SH5 v-final)",
+      "src": "bench-sh5-medium.json (1-pass bench-sh5-v7 read 12.1 / 16.86 at scale 1.00: fail)"
+    },
+    "high": {
+      "med": 11,
+      "p95gb": 14.69,
+      "p95gb2": 14.45,
+      "gpuMs": 11.49,
+      "scale": 0.85,
+      "holds60": true,
+      "passes": 1,
+      "version": "1.5.0-wip (SH5 v-final)",
+      "src": "bench-sh5-v7.json"
+    },
+    "ultra": {
+      "med": 12,
+      "p95gb": 15.3,
+      "p95gb2": 15.3,
+      "gpuMs": 12.51,
+      "scale": 0.94,
+      "holds60": true,
+      "passes": 1,
+      "version": "1.5.0-wip (SH5 v-final)",
+      "src": "bench-sh5-v7.json (margin 1.4: not settled by the adaptive rule)"
+    },
+    "high-moving": {
+      "med": 11,
+      "p95gb2": 15.97,
+      "gpuMs": 11.94,
+      "scale": 0.85,
+      "holds60": true,
+      "passes": 1,
+      "src": "bench-sh5-v7.json"
+    },
+    "ultra-moving": {
+      "med": 11.2,
+      "p95gb2": 14.7,
+      "gpuMs": 11.99,
+      "scale": 0.85,
+      "holds60": true,
+      "passes": 1,
+      "src": "bench-sh5-v7.json"
+    },
+    "scale1_native": {
+      "low@1": {
+        "med": 10.7,
+        "p95gb": 15.95,
+        "gpuMs": 11.37
+      },
+      "medium@1": {
+        "med": 12.3,
+        "p95gb": 19.68,
+        "gpuMs": 13.51
+      },
+      "high@1": {
+        "med": 12.9,
+        "p95gb": 19.44,
+        "gpuMs": 14.04
+      },
+      "ultra@1": {
+        "med": 12.6,
+        "p95gb": 19.78,
+        "gpuMs": 13.61
+      },
+      "holds60": null,
+      "src": "bench-final-1.5-native.json, 3 passes, v-final2 build (same GLSL as SH5's; only the governor changed). No p95gb2 recorded, so holds-60 is unknown"
+    },
+    "secondary_latest": {
+      "high@rd=8": {
+        "med": 10.2,
+        "p95gb2": 12.33,
+        "holds60": true
+      },
+      "ultra@rd=8": {
+        "med": 10.8,
+        "p95gb2": 12.35,
+        "holds60": true
+      },
+      "high@rd=10": {
+        "med": 12.1,
+        "p95gb2": 15.5,
+        "holds60": true
+      },
+      "ultra@rd=10": {
+        "med": 11.2,
+        "p95gb2": 14.4,
+        "holds60": true
+      },
+      "high@fov=70": {
+        "med": 11.6,
+        "p95gb2": 14.4,
+        "holds60": true
+      },
+      "ultra@fov=70": {
+        "med": 10.5,
+        "p95gb2": 14.6,
+        "holds60": true
+      },
+      "high@fov=110": {
+        "med": 11.5,
+        "p95gb2": 16.4,
+        "holds60": true
+      },
+      "ultra@fov=110": {
+        "holds60": null
+      },
+      "src": "bench-sh5-secondary.json, 1 pass, interrupted (ultra@fov=110 errored); high@fov=110 is within 0.3 of the line"
+    },
+    "vsync": {
+      "high": {
+        "missPct": 0.17,
+        "scale": 0.994,
+        "scaleChgPerMin": 3,
+        "holds60": true
+      },
+      "ultra": {
+        "missPct": 0.17,
+        "scale": 0.994,
+        "scaleChgPerMin": 3,
+        "holds60": true
+      },
+      "high-moving": {
+        "missPct": 0,
+        "scale": 1,
+        "scaleChgPerMin": 0,
+        "holds60": true
+      },
+      "ultra-moving": {
+        "missPct": 0.59,
+        "scale": 0.985,
+        "scaleChgPerMin": 6,
+        "holds60": true
+      },
+      "high@1_bench": {
+        "med": 16.7,
+        "missPct": 1.05,
+        "gpuMs": 13.82,
+        "holds60": false,
+        "src": "bench-bench4-vsync-check.json, 8 s, pre-SH5 governor at scale 1: fails by 0.05 pp = 1/4 frame, not significant"
+      },
+      "src": "handover-SH5.md §2: SH5 40-s trace rows of v7 (not bench reports); no bench --vsync run of the current build exists yet"
+    },
+    "baseline_1.4.0_rd12": {
+      "vanilla": {
+        "med": 4.5,
+        "p95gb": 6.8,
+        "gpuMs": 4.59
+      },
+      "off": {
+        "med": 6.1,
+        "p95gb": 9.37,
+        "gpuMs": 6.95
+      },
+      "low": {
+        "med": 15.1,
+        "p95gb": 19.2,
+        "gpuMs": 15.54
+      },
+      "medium": {
+        "med": 15.1,
+        "p95gb": 18.7,
+        "gpuMs": 15.62
+      },
+      "high": {
+        "med": 15.3,
+        "p95gb": 18.99,
+        "gpuMs": 15.72
+      },
+      "ultra": {
+        "med": 15.3,
+        "p95gb": 27.31,
+        "gpuMs": 15.99
+      },
+      "src": "bench-baseline-1.4.0-rd12.json, 3 passes, cool machine"
+    }
+  },
+  "first_guess": {
+    "hold 60 at the standard (uncapped)": "high (Auto). 11.0 / p95gb2 14.45 at scale 0.85 has the widest margin of the enabled presets (bench-sh5-v7); low (13.73) if Auto must stay at 1.0. Accept with --protocol accept.",
+    "max quality that holds 60 under vsync": "ultra (Auto): SH5's v7 40-s traces read miss 0.17% at scale 0.994 with 3 changes/min, and ultra-moving 0.59%. Confirm with --vsync --seconds 30 --repeat 2 on vanilla,ultra,ultra-moving (~8.5 min).",
+    "cheapest shadows": "medium, or high+shadowCascades=false. Turning shadows on costs ~2 GPU ms at rd 12 (1.6 at rd 8). Every shadow knob (filter 0/1/2, cascades, size 1024-2048) is within 0.7 ms = noise; only shadowSize=4096 costs (+2.1 GPU, p95gb +11). Cascades off halves redraws (30 -> 15/min). For a real saving use renderScale (0.9: ~-1.3 ms on medium; 0.7: -2 to -3 ms) or shadows off.",
+    "is my GLSL change a per-primitive regression?": "Compare off vs vanilla at rd 12 and rd 8: today's off tax is +0.1-0.4 GPU ms at rd 12. More than ~1 ms at rd 12, growing with rd, means a geometry-shader-style per-primitive cost such as a flat varying (+3.0 at rd 12, +1.1 at rd 8).",
+    "rd 8 player": "high or ultra at scale 1: 10.2-10.8 med, p95gb2 12.3 (bench-sh5-secondary).",
+    "worst-case secondary row": "high@rd=10 (12.1 / 15.5) and high@fov=110 (16.4, 0.3 from the line). FOV 110 is cheaper than FOV 80 for the script at scale 1; FOV 70 is dearer."
+  }
+}

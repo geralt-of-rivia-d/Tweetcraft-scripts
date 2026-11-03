@@ -47,8 +47,26 @@ A one-line fix doesn't need a team.
 - **The gates don't move.**
   - Each agent verifies its own part: `npm run check`, `npm run smoke -- --only <script>`, and screenshots for UI
     or visuals.
-  - Then the lead integrates: `userscript-reviewer` on the full diff, then `npm test`.
+  - Then the lead integrates: `userscript-reviewer` on the full diff, then `npm run cloud -- test` (see "Testing:
+    cloud by default" in phase 4).
   - Speed never skips a phase.
+
+## Go faster without skipping a phase
+
+Where past sessions lost the most time, and the fix (detail: `.claude/codemap/optimisation-log.md` §6):
+- **Criteria that moved.** They changed three times during 1.5, and each change threw away finished work. Fix the
+  acceptance criteria, their metrics and the exact commands in phase 2, before any code or bench.
+- **The user's setup found late.** For performance, ask first: render distance, FOV, fullscreen, refresh rate,
+  Energy Saver. Bench there first.
+- **Claims without numbers.** 1.4.0 shipped "faster shaders" with no real-GPU measurement. No performance claim
+  without a bench row.
+- **Benches that answered nothing.** One bench protocol per decision (`screen` to choose, `accept` once to ship),
+  a written prediction first, and the noise floor to judge it. See "Benchmark smart" in `tweetcraft-shaders`.
+- **Waiting on the GPU or on tests.** Cloud check and smoke run in parallel with local GPU work, review and docs:
+  start `npm run cloud -- test` in the background as soon as there is something to test.
+- **Lost state.** Write the handover before a long run starts, not after. Replace an agent whose context passes
+  about 250k tokens with a fresh one from a written handover. Resume by re-running the gates on the exact copy.
+- **Lost tools.** An analysis script worth running twice goes into `tools/`, not a session scratchpad.
 
 ## 1. Understand (measure)
 
@@ -62,20 +80,26 @@ A one-line fix doesn't need a team.
   4. Fan wide searches out to parallel `game-code-explorer` agents, one question area each.
 - **Live facts:** confirm assumptions with `npm run probe -- "<expr>"`. Exports, DOM after a menu opens and shader
   sources are all checkable in seconds. Don't build on a guess you could have checked.
-- **The baseline:** run `npm test` before changing anything (in the background while the research agents work), so
-  you know which failures are yours.
+- **The baseline:** run `npm run cloud -- test` before changing anything (in the background while the research
+  agents work), so you know which failures are yours. In a heavy session (a team, or any bench work) start with
+  `npm run cloud -- minutes`.
+- **Performance work:** read the knowledge in "Benchmark smart" (`tweetcraft-shaders` skill) now, before choosing
+  what to try: the machine profile, the optimisation log and `npm run bench:history`.
 
 ## 2. Specify (measure again)
 
 Write down, before coding:
-- **What the user will see** (the acceptance criteria).
+- **What the user will see** (the acceptance criteria), as checkable statements with their metric and threshold.
+  Fix them now: revising criteria mid-way cost past sessions whole bench rounds. For performance, name the bench
+  protocol, the scenarios and settings, the metric (median, `p95gb2`, vsync miss%) and the threshold, plus the
+  predicted result from the machine profile's cost table. Change them later only with the user, in writing.
 - **Hooks:** for each game hook, the anchor, how it's detected, and what happens if it's missing (the fallback).
 - **The checks that prove it applied.** The `compat/expectations.mjs` owner adds them before the code that depends
   on them:
   - a `source` anchor for each new dependency on game code (it should pass against today's snapshot);
   - a `runtime` check for each wrapper or registration;
   - a `shaders` marker and `min` for GLSL patches.
-- **Performance budget**, for anything on a per-frame or per-draw path.
+- **Performance budget**, for anything on a per-frame or per-draw path, in ms from the cost table.
 - **The team plan:** the workstreams, each one's owner and files, and the contracts between them. The contracts go
   into the briefs word for word.
 
@@ -97,17 +121,47 @@ For a non-trivial change, show this plan to the user before implementing. It's c
 ## 4. Verify
 
 ```sh
-npm run check                                   # metadata, syntax, version bump, static anchors
-npm run smoke -- --only <script>                # fast loop while iterating
-npm test                                        # everything together: catches cross-script interactions
+npm run cloud -- test                           # check + smoke in GitHub Actions on the working tree (default)
+npm run check                                   # local: metadata, syntax, version bump, static anchors (offline, seconds)
+npm run smoke -- --only <script>                # local: fast loop while iterating on one hook
+npm test                                        # local: check then smoke, when the cloud is unavailable
 npm run probe -- --scripts "<expr>"             # inspect resulting state
 ```
 
-- **In a team,** each agent runs `check` and `smoke -- --only <script>` on its own part and reports the results.
-  The lead runs `npm test` once every part is in.
+### Testing: cloud by default
+
+- **Check and smoke run in the cloud:** `npm run cloud -- test` (prod; `--target both` mirrors CI; `check` or
+  `smoke` alone; `--only <name>` narrows smoke by substring). It snapshots the working tree (uncommitted files
+  included) to a throwaway `ci/*` branch, waits for the `Game watch` run, prints each step's result (with the log
+  tail of a failed step), downloads the reports to `reports/cloud/<run-id>/report-<target>/`, and deletes the
+  branch. About 2 min 15 s for `test`, 25 s for `check`.
+  - Exit 0 is green. 1 is red, or a run that couldn't complete (auth, push, timeout), and then it says to run
+    `npm test` locally.
+  - `--no-wait` returns at once; collect the result later with `npm run cloud -- wait <run-id|branch>`.
+  - CI checks against a fresh snapshot of the live game, not your local one.
+- **It costs nothing and needs no asking.** The repo is public, so Actions minutes are free (`npm run cloud --
+  minutes` shows them). The user has given standing permission for these `ci/*` pushes; they never touch main or
+  the real index, never open issues, and each run has its own branch, so parallel runs don't cancel each other.
+  Public also means the work in progress is visible on the branch during the run.
+- **Run them locally only** when iterating fast on one hook (`check`, then `smoke -- --only <script>`), or when the
+  cloud is unavailable.
+- **Never run local smoke or probe during a real-GPU bench.** SwiftShader loads the CPU and skews the bench; they
+  would wait for `reports/.gpu.lock` anyway. That is exactly when the cloud run pays off: start it, then bench.
+- **Parallel by default.** The cloud run is slower than local `npm test` (about 1.5 min) but uses none of this
+  laptop's CPU or GPU. Launch it in the background as soon as the code is in, and keep going (bench, review, docs)
+  while it runs.
+
+### The gates
+
+- **In a team,** each agent runs `check` and `smoke -- --only <script>` on its own part (`npm run cloud -- smoke
+  --only <script>` while a bench runs) and reports the results. The lead runs `npm run cloud -- test` once every
+  part is in.
 - **Green means green.** No new failures, no new `console.error` from our scripts, and the expectations you
   added pass. If a test is wrong, fix the test with a written reason. Never weaken a check just to pass.
-- **Look at `reports/smoke-prod.png`** for anything visual.
+- **Look at `reports/smoke-prod.png`** for anything visual (from a cloud run:
+  `reports/cloud/<run-id>/report-prod/`).
+- **Performance:** follow "Benchmark smart" in `tweetcraft-shaders`. `--protocol screen` while choosing, then one
+  `--protocol accept` run for the criteria fixed in phase 2.
 - **Prove the checks catch breakage.** For a new hook, temporarily break its anchor (in a copy of the snapshot,
   run `npm run check -- --snapshot <copy>`) and make sure the check fails.
 
@@ -117,7 +171,7 @@ npm run probe -- --scripts "<expr>"             # inspect resulting state
   paths, compatibility, metadata and version, and expectations coverage.
 - Address its findings or explain why not. Send each finding to the agent that owns the file, through SendMessage
   (its context is intact), and fix it yourself only if that's a handful of tool calls.
-- Then run `npm test` again. It is the final gate.
+- Then run `npm run cloud -- test` again (`npm test` if the cloud is unavailable). It is the final gate.
 
 ## 6. Hand over
 

@@ -1,21 +1,64 @@
 // Headless Chrome helpers: open the game with WebGL2, inject userscripts, record shader programs.
 import { chromium } from 'playwright-core';
+import { acquireGpuLock, acquireSoftwareLock } from './gpu-lock.mjs';
 
 // Software WebGL so this works on machines and CI runners without a GPU.
 const ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--mute-audio'];
 
-/** Launch installed Google Chrome; fall back to a Playwright-managed Chromium if present. */
-export async function launchBrowser({ headed = false } = {}) {
-  const opts = { headless: !headed, args: ARGS };
+// Real-GPU mode (bench, GPU experiments): the real ANGLE backend, no frame cap, no throttling of a window that is
+// occluded or in the background, and DPR 1 so 1920x1080 CSS px are 1920x1080 device px. `vsync: true` keeps the
+// display's vsync and Chrome's frame-rate limit (drops --disable-gpu-vsync and --disable-frame-rate-limit), so frames
+// are paced like a player's browser (60 Hz on this laptop). Don't add a
+// --disable-features flag here: Chrome keeps only the last one, which would drop Playwright's own list.
+export const ANGLE_BACKENDS = ['d3d11', 'd3d9', 'gl', 'vulkan', 'metal', 'swiftshader'];
+const UNCAP_ARGS = ['--disable-gpu-vsync', '--disable-frame-rate-limit'];
+const gpuArgs = (angle, vsync) => [
+  `--use-angle=${angle}`,
+  '--ignore-gpu-blocklist',
+  ...(vsync ? [] : UNCAP_ARGS),
+  '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding',
+  '--disable-background-timer-throttling',
+  '--force-device-scale-factor=1',
+  '--window-position=0,0',
+  '--mute-audio',
+];
+
+/**
+ * Launch installed Google Chrome; fall back to a Playwright-managed Chromium if present.
+ *
+ * Software mode (default): SwiftShader, headless unless `headed`. Registers reports/.sw-<pid>.lock and first waits
+ * while a real-GPU run holds reports/.gpu.lock (see gpu-lock.mjs).
+ * GPU mode (`gpu: true`): the real GPU through ANGLE `angle` (d3d11 | gl | vulkan ...), headed unless
+ * `headless: true`, uncapped unless `vsync: true`. Waits for and holds the exclusive GPU lock. `args` are appended
+ * either way.
+ * The lock is released when the browser disconnects (close, crash) and on process exit.
+ */
+export async function launchBrowser({ headed = false, gpu = false, angle = 'd3d11', headless, vsync = false, args = [], windowSize = [1920, 1080], owner, lockTimeoutMs, log } = {}) {
+  if (gpu && !ANGLE_BACKENDS.includes(angle)) throw new Error(`Unknown ANGLE backend "${angle}". Use one of: ${ANGLE_BACKENDS.join(', ')}`);
+  const lockOpts = { owner, timeoutMs: lockTimeoutMs, log };
+  for (const k of Object.keys(lockOpts)) if (lockOpts[k] === undefined) delete lockOpts[k];
+  const release = gpu ? await acquireGpuLock(lockOpts) : await acquireSoftwareLock(lockOpts);
+  const opts = gpu
+    ? { headless: headless === true, args: [...gpuArgs(angle, vsync), ...(windowSize ? [`--window-size=${windowSize[0]},${windowSize[1]}`] : []), ...args] }
+    : { headless: !headed, args: [...ARGS, ...args] };
+  let browser;
   try {
-    return await chromium.launch({ ...opts, channel: 'chrome' });
-  } catch (chromeErr) {
     try {
-      return await chromium.launch(opts);
-    } catch {
-      throw new Error(`Could not start Google Chrome (${chromeErr.message.split('\n')[0]}). Install Chrome, or run "npx playwright-core install chromium".`);
+      browser = await chromium.launch({ ...opts, channel: 'chrome' });
+    } catch (chromeErr) {
+      try {
+        browser = await chromium.launch(opts);
+      } catch {
+        throw new Error(`Could not start Google Chrome (${chromeErr.message.split('\n')[0]}). Install Chrome, or run "npx playwright-core install chromium".`);
+      }
     }
+  } catch (e) {
+    release();
+    throw e;
   }
+  browser.on('disconnected', release);
+  return browser;
 }
 
 // Runs in the page before anything else. Wraps linkProgram to record each program's final
@@ -60,10 +103,15 @@ function recorder() {
 /**
  * Open the game. `userscripts` are injected at document-start in the given order, like
  * Tampermonkey's @run-at document-start. Each gets a sourceURL so errors can be traced to it.
+ * `initScripts` (functions or `{content}`) run before the shader recorder and the userscripts, so anything they
+ * wrap (requestAnimationFrame, getContext) sits under every userscript wrapper. `viewport`/`deviceScaleFactor`
+ * default to 1280x720 at the browser's own DPR.
  */
-export async function openGame(browser, url, { userscripts = [], timeoutMs = 60000, settleMs = 2500, minPrograms = 0 } = {}) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+export async function openGame(browser, url, { userscripts = [], timeoutMs = 60000, settleMs = 2500, minPrograms = 0, viewport = { width: 1280, height: 720 }, deviceScaleFactor, initScripts = [], fullscreen = false } = {}) {
+  const context = await browser.newContext({ viewport, ...(deviceScaleFactor ? { deviceScaleFactor } : {}) });
   const page = await context.newPage();
+  if (fullscreen) await setFullscreen(page);
+  for (const s of initScripts) await page.addInitScript(s);
   const consoleMsgs = [];
   const pageErrors = [];
   page.on('console', m => {
@@ -79,6 +127,23 @@ export async function openGame(browser, url, { userscripts = [], timeoutMs = 600
   await page.goto(url.replace(/\/?$/, '/'), { waitUntil: 'load', timeout: timeoutMs });
   const programs = await waitForShaders(page, { timeoutMs, settleMs, minPrograms });
   return { context, page, consoleMsgs, pageErrors, programs };
+}
+
+/**
+ * Put a headed page's window into real browser fullscreen (like F11: no tabs or borders, the page covers the
+ * screen), through the DevTools protocol. Use with `viewport: null`, so the page takes the window's size. (Chrome's
+ * --start-fullscreen flag is not applied to the windows Playwright opens for new contexts.) Returns the window bounds.
+ */
+export async function setFullscreen(page) {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const { windowId } = await cdp.send('Browser.getWindowForTarget');
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'fullscreen' } });
+    await page.waitForTimeout(500);
+    return (await cdp.send('Browser.getWindowBounds', { windowId })).bounds;
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
 }
 
 /**

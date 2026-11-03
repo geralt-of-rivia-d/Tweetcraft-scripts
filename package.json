@@ -12,7 +12,10 @@
     "smoke": "node tools/smoke.mjs",
     "test": "node tools/check.mjs && node tools/smoke.mjs",
     "dev": "node tools/dev-loaders.mjs",
-    "probe": "node tools/probe.mjs"
+    "probe": "node tools/probe.mjs",
+    "bench": "node tools/bench.mjs",
+    "bench:history": "node tools/bench-history.mjs",
+    "cloud": "node tools/cloud.mjs"
   },
   "devDependencies": {
     "acorn": "^8.19.0",

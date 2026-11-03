@@ -1,19 +1,20 @@
 # Codemap: our Tweetcraft userscripts
 
-Verified on 2026-11-02 against the working copies and game build c111547912 (re-verified from d7bde3deb9, which had the same game code as b4bc035ec8 and 26479914e5). Abbreviations: **SH** `twitterentary-shaders.user.js`, **BO** `tweetcraft-better-options.js`, **ZM** `tweetcraft-zoom.user.js`, **CH** `tweetcraft-chat-history.js`, **game:** = `game/prod/<LATEST>/pretty/js/` (`game style.css` = `pretty/style.css`); its line numbers are those of build c111547912. `SH:120` means file:line. Anything not checked directly in code is marked (inferred).
+Verified on 2026-11-03 against game build 575c9209bc (game references re-verified from 325afb04b5, itself re-verified from c111547912 and d7bde3deb9, which had the same game code as b4bc035ec8 and 26479914e5; 575c9209bc changed none of the game files cited here except `lang/en.js`, whose cited lines didn't move) and the working copies of SH 1.5.0 (2478 lines), BO 1.2.0, ZM and CH. Abbreviations: **SH** `twitterentary-shaders.user.js`, **BO** `tweetcraft-better-options.js`, **ZM** `tweetcraft-zoom.user.js`, **CH** `tweetcraft-chat-history.js`, **game:** = `game/prod/<LATEST>/pretty/js/` (`game style.css` = `pretty/style.css`); its line numbers are those of build 575c9209bc. `SH:120` means file:line. Anything not checked directly in code is marked (inferred).
 
 ## 1. How the scripts relate
 
 All four scripts are standalone `document-start` IIFEs on `https://tweetcraft.jai.vin/*`.
 
-- **BO is the hub.** It sets up `window.__tcOptions` synchronously when it runs (BO:62).
+- **BO is the hub.** It sets up `window.__tcOptions` synchronously when it runs (BO:63).
   - The tooling loads BO first (`tools/lib/common.mjs:63-68`), and ZM polls every 200 ms until the bus exists (ZM:133-135), so for the bus itself load order doesn't matter.
   - Load order does decide which capture listener on `window` runs first.
-- **SH** only needs to wrap `WebGL2RenderingContext.prototype` before gfx.js creates its context and compiles its shaders in the `Gfx` constructor (game:gfx.js:723).
-  - It reads `tc.shader.<key>` once at startup, clamped (SH:128-133), and publishes `window.Twitterentary` (SH:1338).
-  - Its `set`, `applyPreset` and `reset` write the settings back.
-  - It uses the bus only for `toast` (SH:1345-1346) and `capturing` (the K guard, SH:1358).
-- **BO's Shaders tab** reads `Twitterentary.cfg`, `.schema` and `.presets` each time the tab is built, and writes through `TE.set`, `applyPreset` and `reset` (BO:702-721).
+- **SH** only needs to wrap `WebGL2RenderingContext.prototype` (and, since 1.5.0, `window.requestAnimationFrame`) before gfx.js creates its context and compiles its shaders in the `Gfx` constructor (game:gfx.js:724).
+  - It reads `tc.shader.<key>` once at startup, clamped (SH:139), and publishes `window.Twitterentary` (SH:2449).
+  - Its `set`, `applyPreset` and `reset` write the settings back; `bench()` changes `CFG` in memory and restores it.
+  - It uses the bus only for `toast` (`notify`, SH:2455-2466) and `capturing` (the K guard, SH:2467-2478).
+- **BO's Shaders tab** reads `Twitterentary.cfg`, `.schema` and `.presets` each time the tab is built, and writes through `TE.set`, `applyPreset` and `reset` (BO:836-883).
+  - New in BO 1.2.0: its performance overlay reads `Twitterentary.perf` 4×/s, and its benchmark calls `Twitterentary.bench()` (with `bench.running`, `.defaults`, `.estimate`, and `.abort` to stop a run on Escape). All are feature-detected (§3).
   - With an older SH without `set`, it writes `cfg[key]` and `tc.shader.<key>` itself.
 - **CH** shares nothing with the others.
 - **Shared storage and DOM:**
@@ -41,55 +42,56 @@ All four scripts are standalone `document-start` IIFEs on `https://tweetcraft.ja
 
 | Member | BO line | Notes / consumers |
 |---|---|---|
-| `version` | 40 | `VERSION` = `GM_info.script.version` (20), `'0.0.0'` without `GM_info`. Shown in the About tab (853) |
-| `apiVersion` | 41 | `2` since 1.1.0 (adds `reset`, `ui.cycle`). Checked by compat; no script consumer yet |
-| `config` (getter) | 42 | live `cfg` object. No consumer |
-| `get(k, d)` | 43 | stored value, else a clone of `DEFAULTS[k]`, else `d`. Used by BO and ZM `tcGet` (ZM:29) |
-| `set(k, v)` | 44 | `cfg[k]=v`, `save()` to `tc.options`, `emit(k, v)`. Used by BO and ZM `tcSet` (ZM:34) |
-| `reset()` | 46-51 | `cfg = clone(DEFAULTS)`, `save()`, then emits every key that was set before as `(k, bus.get(k))`: the default for BO's keys, `undefined` for mod keys (`zoom.*`). ZM re-reads through `changed` → `refreshConfig`. Used by `resetAll` (821) |
-| `register({id,title,build(api)})` | 52 | adds a tab `reg:<id>` (after Shaders, before Keybinds) and emits `'__sections'`; a repeated `id` is ignored. `build` must return an array of nodes (spread into the screen at 889). ZM:146 (Zoom tab) |
-| `registerKeybind({id,label,get,set,reset})` | 53 | listed in the Keybinds tab, emits `'__keybinds'`; a repeated `id` is ignored. ZM:137 (`defaultKey` is passed but never read). `reset` may be async: `resetAll` awaits it |
-| `changed(cb)` | 54 | `cb(key, value)` on every set or emit; no way to unsubscribe. ZM:136 |
-| `open()` | 55 | `openMenu` (async). No consumer |
-| `toast(text)` | 56/71 | writes `#note.show` for 2 s; `console.log` if there's no `#note`. SH `notify` (SH:1345) |
-| `fov {get,set}` | 197 | `getFov` / `setFov` (async). ZM:45, ZM:79 |
-| `capturing` | 58, 586 | true while the Keybinds tab waits for a key. ZM:103,109 and SH:1358 check it; CH doesn't |
-| `ui {h,T,row,note,header,btn,toggle,cycle,slider,item,refresh,toast,prettyKey}` | 902 | builder kit. Sections actually get `api()` (899-901), which adds `bus, currentKeyFor, fov` |
-| `build`, `close` | 903-904 | `buildScreen` / `closeMenu`. No consumer |
-| test seams | 102, 164, 228, 394-398 | `_injectMenus`, `_labels` (compat's i18n check), `_setRenderDistance` (no consumer yet), `_injectUi, _patchHud, _patchSurvival, _injectSurvival, _rescaleLabels` (unused by `tools/` and `compat/`) |
+| `version` | 41 | `VERSION` = `GM_info.script.version` (20), `'0.0.0'` without `GM_info`. Shown in the About tab (1322) |
+| `apiVersion` | 42 | `2` since 1.1.0 (adds `reset`, `ui.cycle`). Checked by compat; no script consumer yet |
+| `config` (getter) | 43 | live `cfg` object. No consumer |
+| `get(k, d)` | 44 | stored value, else a clone of `DEFAULTS[k]`, else `d`. Used by BO and ZM `tcGet` (ZM:29) |
+| `set(k, v)` | 45 | `cfg[k]=v`, `save()` to `tc.options`, `emit(k, v)`. Used by BO and ZM `tcSet` (ZM:34) |
+| `reset()` | 47-52 | `cfg = clone(DEFAULTS)`, `save()`, then emits every key that was set before as `(k, bus.get(k))`: the default for BO's keys, `undefined` for mod keys (`zoom.*`). ZM re-reads through `changed` → `refreshConfig`. Used by `resetAll` (1290) |
+| `register({id,title,build(api)})` | 53 | adds a tab `reg:<id>` (after Shaders, before Keybinds) and emits `'__sections'`; a repeated `id` is ignored. `build` must return an array of nodes (spread into the screen at 1358). ZM:146 (Zoom tab) |
+| `registerKeybind({id,label,get,set,reset})` | 54 | listed in the Keybinds tab, emits `'__keybinds'`; a repeated `id` is ignored. ZM:137 (`defaultKey` is passed but never read); BO itself registers `tc.perfOverlay` (813). `reset` may be async: `resetAll` awaits it |
+| `changed(cb)` | 55 | `cb(key, value)` on every set or emit; no way to unsubscribe. ZM:136, BO's overlay (809) |
+| `open()` | 56 | `openMenu` (async). No consumer |
+| `toast(text, ms)` | 57/73 | writes `#note.show` for `ms` (default 2 s; the `ms` argument is new in 1.2.0); `console.log` if there's no `#note`. SH `notify` |
+| `fov {get,set}` | 199 | `getFov` / `setFov` (async). ZM:45, ZM:79 |
+| `capturing` | 59, 606 | true while the Keybinds tab waits for a key. ZM:103,109, SH's K listener and BO's `onPerfKey` and `onBenchKey` check it; CH doesn't |
+| `ui {h,T,row,note,header,btn,toggle,cycle,slider,item,refresh,toast,prettyKey}` | 1371 | builder kit. Sections actually get `api()` (1368-1370), which adds `bus, currentKeyFor, fov` |
+| `build`, `close` | 1372-1373 | `buildScreen` / `closeMenu`. No consumer |
+| test seams | 104, 166, 230, 396-400, 712, 1168-1169 | `_injectMenus`, `_labels` (compat's i18n check), `_setRenderDistance`, `_injectUi, _patchHud, _patchSurvival, _injectSurvival, _rescaleLabels`, and new in 1.2.0 `_keybinds()`, `_runBench(opts)`, `_benchText(b)` (compat's runtime checks) |
 
 **localStorage**
 
 | Key | Format | Writers | Readers |
 |---|---|---|---|
-| `tc.options` | JSON `{ui.scale, hud.on, input.sens, keys.map{src:def}, keys.mute[def], zoom.key, zoom.level, zoom.look}` | BO `save` (32), also from `bus.reset` (49); ZM:35 fallback only | BO:31 once at load; ZM:30 fallback |
-| `tc.shader.<CFG key>` | `String(value)`; removed when it equals the default | SH `persist` (SH:135, from `set`/`applyPreset`, which includes the K toggle); SH `reset` removes every `tc.shader.*` key (SH:1314); BO `setShader` fallback (707) and `clearShaderKeys` (694) | SH:128-133, only at startup, through `coerce` |
-| `mc.fov` | number. The game accepts 30-110 (game:main.js:223-226) | game slider `oninput` (game:menus.js:1805-1809), BO `setFov` (193), ZM:80 | game, BO:168/172, ZM:44 |
-| `mc.rd` | one of 4,6,8,10,12 (game:view.js:1) | game `cycleRd` (game:main.js:3002-3004), BO:225 | game (game:main.js:248), BO:199 |
+| `tc.options` | JSON `{ui.scale, hud.on, input.sens, keys.map{src:def}, keys.mute[def], perf.overlay, perf.key, bench.last, zoom.key, zoom.level, zoom.look}` (`bench.last`: §3) | BO `save` (33), also from `bus.reset` (50); ZM:35 fallback only | BO:32 once at load; ZM:30 fallback |
+| `tc.shader.<CFG key>` | `String(value)`; removed when it equals the default | SH `persist` (SH:170-178, from `set`/`applyPreset`, which includes the K toggle); SH `reset` removes every `tc.shader.*` key (SH:2415-2424); SH `bench()` restores every key exactly afterwards (`lsRestore`, SH:2233-2239); BO `setShader` fallback (848-850) and `clearShaderKeys` (836) | SH:139, only at startup, through `coerce` |
+| `tc.shader.format` | `'1.5'`: this profile was saved by SH 1.5.0+ | SH: the one-time 1.4.0 High/Ultra migration (SH:148-168) and `persist` with its first non-default value (SH:170-178); removed by SH `reset` and BO `clearShaderKeys` with the other `tc.shader.*` keys; `bench()` restores it exactly | SH:150, at startup (it gates the migration) |
+| `mc.fov` | number. The game accepts 30-110 (game:main.js:224-227) | game slider `oninput` (game:menus.js:1805-1809), BO `setFov` (195), ZM:80 | game, BO:170/174, ZM:44 |
+| `mc.rd` | one of 4,6,8,10,12 (game:view.js:1) | game `cycleRd` (game:main.js:3077-3079), BO:227 | game (game:main.js:249), BO:201 |
 
 **Shared DOM / CSS:**
-- **Elements:** `#gl` canvas (BO, ZM: pointer-lock checks), `#screen` with class `on` and `#screen .inner` (BO, ZM), `.tc-marker` (BO's "our menu is open" flag, 166/879), `#inv.off` (BO:589), `#hudtop` (BO:247, the game's HUD state), `#note.show` (BO toast, SH `notify` fallback), `#chatbox` (CH), `#cross` (BO CSS scales it by `--tc-s`).
-- **BO's `<style>` (`ensureCSS`, 480-525):** styles `#screen .inner .tc-*`, sets the pixel font, sizes captions with `--tc-f`, scopes its button text rules to `#screen .inner:has(> .tc-marker)` (our screen only), and hides the game's English `Distance:` and `Fullscreen` pause buttons.
-- **`<style id="tc-options-i18n">` (139-154):** hides the same two buttons by their translated labels.
-- **Distance:** BO still clicks the hidden Distance button (217-223).
+- **Elements:** `#gl` canvas (BO, ZM: pointer-lock checks), `#screen` with class `on` and `#screen .inner` (BO, ZM), `.tc-marker` (BO's "our menu is open" flag, 168/1348), `#inv.off` (BO:609), `#hudtop` (BO:249, the game's HUD state; also BO's overlay placement, 759, with `#hudright`), `#tc-perf` (BO's overlay, 728), `#note.show` (BO toast, SH `notify` fallback), `#chatbox` (CH; BO's `chatOpen` reads its `hidden`, 819), `.se, .sp, #sign-editor, #book-screen` (the game's editors, BO's `editorOpen`, 820), `#screen .inner .tc-bench-screen` (BO's benchmark screen marker, 1014), `#cross` (BO CSS scales it by `--tc-s`).
+- **BO's `<style>` (`ensureCSS`, 482-542):** styles `#screen .inner .tc-*`, sets the pixel font, sizes captions with `--tc-f`, scopes its button text rules to `#screen .inner:has(> .tc-marker)` (our screen only), and hides the game's English `Distance:` and `Fullscreen` pause buttons.
+- **`<style id="tc-options-i18n">` (142-156):** hides the same two buttons by their translated labels.
+- **Distance:** BO still clicks the hidden Distance button (209-229, the click at 224).
 - **CSS variables:** BO sets the root variables `--u`, `--d` and `--tc-s`.
 
 **Capture-phase listeners (all on `window`).** Listeners on the same target run in registration order, which is the script load order.
 
 | Script | Events | Guards |
 |---|---|---|
-| BO | `keydown`/`keyup` (630-631), `click` (933), `mousemove` (936) | skips events marked `e.__tc` (its own synthetic events); calls `stopImmediatePropagation` when it swallows, remaps or mutes a key |
+| BO | `keydown`/`keyup` (650-651), `keydown` `onPerfKey` (833), `keydown` `onBenchKey` (1079), `click` (1402), `mousemove` (1405); also, not capture-phase, `fullscreenchange`/`resize` `onBenchResize` (1086-1087) | skips events marked `e.__tc` (its own synthetic events); calls `stopImmediatePropagation` when it swallows, remaps or mutes a key. `onPerfKey` also skips `__tcCaptured`, `capturing`, IME, typing, chat, `#inv` and editors, and only calls `preventDefault`. `onBenchKey` acts only on Escape while a benchmark runs on its screen (not while capturing or typing): it marks the event `__tcCaptured` and calls `stopImmediatePropagation`, so the game never opens its pause menu. `onBenchResize` only stops a running benchmark (in fullscreen, Chrome uses the first Escape to leave fullscreen and never sends the keydown) |
 | ZM | `keydown`/`keyup` (102,108), `wheel` passive:false (114), `mousemove` (122) | `e.__tcCaptured`, `__tcOptions.capturing`, typing |
-| SH | `keydown` KeyK (1356) | modifiers, repeat, `e.__tcCaptured`, `__tcOptions.capturing`, typing (`e.target`). Not a registered keybind (issue 6) |
+| SH | `keydown` KeyK (2467) | modifiers, repeat, `e.__tcCaptured`, `__tcOptions.capturing`, `bench.running`, typing (`e.target`). Not a registered keybind (issue 6) |
 | CH | `focusin`, `keydown` (66,70) | runs only while `#chatbox` is visible; skips IME composition (71) |
 
 **How they avoid conflicts:**
-- **Key capture:** while a key is being captured, BO marks the event `e.__tcCaptured=true` and calls `stopImmediatePropagation` (604-605). That blocks every listener registered after BO's. `bus.capturing` covers the scripts that registered before BO (ZM and SH check it).
-- **BO's own events:** BO tags its re-dispatched events with `ev.__tc=true` so its handler skips them (600): the remaps (623), and the F1 keydown and keyup (250/253).
-- **When remapping is skipped:** for mod keys (`modKeySet()`, 591/614), and while a screen is open, the inventory is open, or the user is typing (590).
+- **Key capture:** while a key is being captured, BO marks the event `e.__tcCaptured=true` and calls `stopImmediatePropagation` (624-625). That blocks every listener registered after BO's. `bus.capturing` covers the scripts that registered before BO (ZM and SH check it).
+- **BO's own events:** BO tags its re-dispatched events with `ev.__tc=true` so its handler skips them (620): the remaps (643), and the F1 keydown and keyup (252/255).
+- **When remapping is skipped:** for mod keys (`modKeySet()`, 611/634, which includes the overlay key), and while a screen is open, the inventory is open, or the user is typing (610).
 - **Mouse look:** BO's and ZM's `mousemove` handlers each redefine `movementX/Y` with `defineProperty`, multiplying in sensitivity and the zoom-look scale. The order doesn't matter (commutative).
 
-## 2. twitterentary-shaders.user.js (SH, 1367 lines)
+## 2. twitterentary-shaders.user.js (SH, 2478 lines)
 
 **Purpose:** patches the game's GLSL at `shaderSource` time:
 - terrain VS: waving, plus the class lookup;
@@ -97,224 +99,326 @@ All four scripts are standalone `document-start` IIFEs on `https://tweetcraft.ja
 - sky FS;
 - cloud FS (broken).
 
-It adds a sun shadow-map pass, and drives everything with uniforms computed from GL calls it observes. Every setting applies live, and Quality/Look presets set groups of them.
+It adds a sun shadow-map pass, which since 1.5.0 draws two tiles into one depth atlas: a sharp near tile around the camera and the full-range far tile. Also new in 1.5.0 is **dynamic resolution**: it redirects the game's 3D frame into its own scene framebuffer at a render scale (Auto or fixed), then composites it to the canvas with a sharpening upscale. It measures frame, CPU and GPU time for `Twitterentary.perf`, the Auto governor and `bench()`. Everything is driven by uniforms computed from GL calls it observes. Every setting applies live, and Quality/Look presets set groups of them.
 
-**Metadata:** `@version 1.4.0`, `@run-at document-start`, `@grant none`, `@namespace tweetcraft.twitterentary`. The in-code `VERSION` (16-18) reads `GM_info.script.version` (`'dev'` without `GM_info`) and feeds `debug()` (1327) and the load log (1366), so there's nothing to keep in sync.
+**Metadata:** `@version 1.5.0`, `@run-at document-start`, `@grant none`, `@namespace tweetcraft.twitterentary`. The in-code `VERSION` (16-18) reads `GM_info.script.version` (`'dev'` without `GM_info`) and feeds `debug()`, `bench()`'s `env.version` and the load log, so there's nothing to keep in sync.
 
 | Name | Line | Purpose |
 |---|---|---|
 | `TAG, VERSION` | 15-18 | |
-| `CFG` | 21-51 | 25 settings (table below). The defaults are Quality Medium + Look Natural |
-| `DEFAULTS` | 52 | frozen copy of `CFG` |
-| `SCHEMA` | 55-77 | 21 UI rows for BO: every CFG key except `shadowDepth`, `shadowTaps`, `shadowCull` and `cloudEffects`. `group` (`quality`/`look`) names the preset picker that owns the key; `section` is its heading in the tab. Types `bool`, `num` (`min/max/step`) and `choice` (`options: [[value, label]…]`). No `reload` flags |
-| `FIELD, HIDDEN_RANGE` | 78-81 | key → SCHEMA row; clamp ranges for the keys without a row (`shadowDepth` 64-1024, `shadowTaps` 2-16) |
-| `RANGE` | 82-84 | `[min, max]` of every numeric key (the SCHEMA range, or `HIDDEN_RANGE`), shared by `coerce` and `cfgNum` |
-| `PRESETS, GROUP_KEYS, deepFreeze` | 86-104 | `{quality: [low, medium, high, ultra], look: [natural, vivid, soft]}`, each `{id, name, desc, values}`, deep-frozen. `GROUP_KEYS` = the SCHEMA keys of each group (6 quality, 8 look) |
-| `coerce` | 107-117 | `coerce(key, v)`: bools from `true/'true'/1/'1'`; numbers clamped to `RANGE`; a `choice` must be one of its options; non-finite → default |
-| `cfgNum` | 118-124 | the live numeric value of a key, normalised like `coerce` (not a number → default, else clamped to `RANGE`) even if `CFG` was written directly from the console. Allocation-free, used by the frame code |
-| `same, SKEY` | 125-126 | `same` = equal within 1e-6; `SKEY(k)` = `'tc.shader.' + k` |
-| localStorage load | 128-133 | every CFG key from `tc.shader.<k>`, through `coerce` |
-| `persist` | 135-140 | writes `tc.shader.<key>`, or removes it when it equals the default |
-| `proto`, `O` | 142-150 | bails out without WebGL2. `O` = 18 original methods: the 15 wrapped ones plus `uniform1i`, `uniform4f` and `uniformMatrix4fv`, so our own uploads skip our wrappers |
-| `clamp01, sstep, dot, normInto, mixInto, copy3` | 152-157 | math helpers; the `*Into`/`copy3` ones write into a target array (no allocations) |
-| `patchTerrainVS` | 161-190 | anchors on `uniform vec3 uOrigin;`, `out vec2 vLight;` and the `vec3 p = …*0.0625+uOrigin;` regex (162). Adds 7 uniforms, `vRel`/`vCls`, the class `texelFetch` (188), and waving (171-184) |
-| `fsDecls(mode)` | 195-273 | the FS uniforms (24, including `uShadowP`, `uShadowQ`, `uWaterOn`, `uLVP` and `uShadowMap`), plus `tcTone` (231), `tcTap` (238) and `tcShadow` (241). `tcWv` (the wave function) is added only for mode 2 |
-| `WATER_CODE` | 278-312 | the water model (below), emitted only into the translucent (mode 2) FS |
-| `shadeCode(lit, alpha, mode, fogR)` | 314-403 | replaces the output line (below) |
-| `patchTerrainFS` | 405-419 | `outRe` (406) captures lightmap use and alpha. `mode`: 2 = `alpha==='c.a'` (translucent), 1 = has `discard` (cutout), 0 = opaque. `fogR` = the FS declares `uniform vec2 uFogR` |
-| `skyCode`, `patchSky` | 421-460 | inserts `uSkySun/uSkyDay/uFx/uSkyOn` after `out vec4 o;` and replaces `o=vec4(c,1.0);` (lit) or `o=vec4(mix(uHor,uTop,sqrt(t)),1.0);`. Always patched; it returns the vanilla colour when `uFx` or `uSkyOn` is 0 (423) |
-| `patchCloud` | 462-470 | **dead**: double-escaped regexes (464, 466) and a literal `\\n` in the inserted text (466). Gated by `CFG.cloudEffects` |
-| `patchSource` | 472-484 | dispatcher, needs `#version 300 es`. VS: `aPos & uvec3`. FS: `sampler2DArray`+`vShade`+`uFog`+`vDist`. Sky: `uTop, uHor`. Cloud: `uTint, uHole` |
-| `FIXED_SUN, OBS, CAMLAST, locKind` | 488-498 | observation state. `locKind`: WeakMap<UniformLocation, 1..6> |
-| `setCam`, `onSprite` | 500-505 | camera from the cloud plane's `uCam`; sun = the first `uC` after `uTop` in the frame |
-| `ATL` + indexOf hook | 507-523 | a temporary `Array.prototype.indexOf` wrapper captures the block-name list searched for `'oak_planks'` (game:main.js:364, `eng.texNames`). It restores the original right after the capture, if it's still ours, or after 60 s at the latest |
-| `RE_EMIT, RE_PLANT, nameClass` | 524-532 | name → class: 0 none, 1 leaves, 2 plant, 3 water, 4 emissive |
-| `readAtlas` | 534-552 | per-layer transparency and mean RGB from the 16×16 array upload |
-| `layerClass` | 554-577 | class by name, falling back to colour and animation heuristics |
-| `CLS_COUNTS, uploadClasses` | 579-603 | 1-row RGBA8 texture (R = class) on unit 7. It reuses `G.clsData` and uploads, and logs, only when a class changed. Then sets `G.dirty` |
-| `shaderSrc, progShaders, progInfo, PROGS` | 607-610 | WeakMaps: shader → `{orig, info, patched}`, program → shaders, program → `info`. `PROGS` lists every info but is never read (issue 53) |
-| `curInfo, curVAO, frameId, shadowFrame, mainGL, lastOrigin, haveOrigin, rec, cols` | 612-616 | per-frame state. `rec`: Map<VAO, part record>. `cols`: Map<column key, {p0, p1}> (the opaque and cutout records of a chunk column) |
-| `ERR, hookError` | 620-629 | the first 3 hook errors are logged (`STATS.errors` counts them all). After 20 in the page's lifetime (not a rate, issue 54), `ERR.off` pauses the effects until a reload |
-| `U1, U3, V1, V3` | 633-637 | the 20 float and 5 vec3 uniforms pushed to every patched program, and their per-frame values |
-| proto wrappers | 639-762 | `shaderSource, compileShader, attachShader, linkProgram, getUniformLocation, uniform3f, uniform3fv, uniform1f, texImage3D, texSubImage3D, bindVertexArray, deleteVertexArray, clear`. `useProgram` (1108) and `drawElements` (1265) come later |
-| `G` | 764-772 | GL resources (`clsTex, clsData, clsW, maxTex, fbo, depthTex, texSize, checkFbo, allocFailed, pOpaque, pCut, shadowOk`), `dirty`, and the shadow snapshot `sh` (`valid, drawn, frame, ms, c0, L, R, U, dx, dy, hx, hy, E, Z, size, cull`) |
-| `lightMat` | 776-784 | ortho light matrix relative to `at`, from the basis and the extent/depth snapshotted in `G.sh` at the last refresh, with the texel snap `dx, dy` |
-| `SUN_LOW, SUN_NOON, ST, WHY, STATS, SCRATCH, isEnd, num` | 786-797 | derived per-frame state and counters. `STATS = {shadowChunks, refreshes, why: {init, dirty, move, sun, age}, errors}`. `isEnd` matches the End's `uSkyLight` (compat-checked) |
-| `updateState` | 799-827 | once per `frameId`, allocation-free: time, cam, `dim`, day = `clamp01(OBS.top[2])` (the zenith's blue channel), sun, `sunL` (y ≥ 0.14), sun colour (`SUN_LOW` → `SUN_NOON`), cloud tint; fills `V1`/`V3` from `CFG` |
-| `shadowTargetSize` | 829-831 | `cfgNum('shadowSize')` (1024-4096), capped at `MAX_TEXTURE_SIZE` |
-| `finalizeShadow(gl, canDraw)` | 838-881 | sets `ST.shadowOn` and decides whether to refresh (below); snapshots the basis, centre and the normalised extent, depth, size and culling into `G.sh`; fills `ST.lvp`. When shaders or shadows are switched off, it shrinks the depth texture back to 1×1, once |
-| `inFootprint` | 884-892 | is a part record inside the current map's area? It assumes a 128-tall column centred at y=64 (issue 50) |
-| `forget` | 894-902 | drops a record from `rec` and its column |
-| `makeProg`, shadow GLSL, `shadowProg` | 904-969 | built with `O.*`, bypassing the patcher. `SHADOW_VS_OPAQUE`/`FS_OPAQUE` (921-933) are depth only, with an empty FS. `SHADOW_VS`/`FS` (935-958) do the cutout alpha test against the atlas, and plants and water (classes 2-3) are culled. `shadowProg` sets `uClsTex = 7` and `uTex = 0` |
-| `initGL` | 974-1024 | on the game's first `useProgram` of a patched program (in `prog()`, game:gfx.js:875, during the `Gfx` constructor). Sets `mainGL`, `maxTex`, `clsTex` on unit 7, a **1×1** `DEPTH_COMPONENT16` compare texture on unit 6, the FBO, and both shadow programs, whatever `CFG.shadows` is |
-| `resolveLocs` | 1026-1040 | per program, once: the locations of `U1`, `U3`, `uCam`, `uLVP`, `uShadowP`, `uShadowOn`; sets the samplers (`uShadowMap = 6`, `uClsTex = 7`); allocates the value caches (`c1, c3, cc, cshp, clvp, cson`) |
-| `applyUniforms` | 1042-1067 | `resolveLocs` first (1045), so the samplers are on units 6/7 even if something below throws on a program's first use; then `updateState`; `uploadClasses` when dirty; uploads each `U1`/`U3` value only if it differs from the program's cache; `pushCam` only once the frame's camera is final (`ST.camFrame === frameId`) |
-| `pushCam` | 1069-1092 | cached `uCam`, `uShadowOn`, and while shadows are on, `uLVP` and `uShadowP = (size, 1/size, 2·E/size, Z)` |
-| `offProgram` | 1096-1106 | the paused path: `uFx = 0` and the two samplers, once per program |
-| `useProgram` wrapper | 1108-1118 | `initGL` once, `curInfo`, `OBS.lit`, then `applyUniforms` (or `offProgram`) |
-| `resizeShadow` | 1120-1130 | `texImage2D` of the depth texture on unit 6 at the new size, restoring the active unit; flags an FBO check |
-| `drawShadowSet` | 1132-1148 | one draw per record of a pass (opaque or cutout) inside the footprint. Casters inside it keep casting however long ago they were drawn (behind the camera, for example); records outside it that haven't been drawn for 60 s are forgotten (1140) |
-| `renderShadow` | 1153-1198 | the shadow pass (below) |
-| `trackColumn` | 1203-1220 | when a column's opaque or cutout part is drawn without its sibling, the sibling's mesh became empty: forget it (and mark dirty if in the footprint) |
-| `terrainDraw` | 1222-1263 | the frame's first terrain draw rebuilds the camera from `uOrigin` deltas, then runs `finalizeShadow(gl, mode < 2)`, `renderShadow` and `pushCam`. A throwing `renderShadow` is caught (1236-1241): no shadows that frame, the map is invalidated, `hookError`, and `pushCam` still runs. Every opaque/cutout draw updates its record: a new record or a changed count in the footprint sets `G.dirty`; then `trackColumn` |
-| `drawElements` wrapper | 1265-1271 | calls `terrainDraw` when `curInfo.terrain && curVAO && haveOrigin && !ERR.off` |
-| `apply, set, applyPreset, currentPreset, reset` | 1280-1322 | the settings API (below) |
-| `debug` | 1324-1337 | diagnostics: version, frame, sun, cam, shadow state, `refreshWhy`, `shadowMap` size, `records`, `errors`, `paused`, `preset`, layer classes |
-| `window.Twitterentary` | 1338-1342 | the global (below) |
-| `notify` | 1344-1355 | `__tcOptions.toast` when BO is there, else its own `#note` toast (1.8 s) |
-| K listener | 1356-1364 | KeyK toggles `enabled` through `set` (saved), with the guards in §1 |
+| `CFG` | 21-57 | 29 settings (table below). The defaults are Quality Medium + Look Natural, with render scale Auto |
+| `DEFAULTS` | 58 | frozen copy of `CFG` |
+| `SCHEMA` | 61-86 | 24 UI rows for BO: every CFG key except `shadowDepth`, `shadowTaps`, `shadowCull`, `shadowCascades` and `cloudEffects`. `group` (`quality`/`look`) names the preset picker that owns the key; `section` is its heading in the tab (Quality, **Performance**, Look, Motion & water). Types `bool`, `num` (`min/max/step`) and `choice` (`options: [[value, label]…]`). No `reload` flags |
+| `FIELD, HIDDEN_RANGE` | 87-90 | key → SCHEMA row; clamp ranges for the keys without a row (`shadowDepth` 64-1024, `shadowTaps` 2-16) |
+| `RANGE` | 92-93 | `[min, max]` of every numeric key (the SCHEMA range, or `HIDDEN_RANGE`), shared by `coerce` and `cfgNum` |
+| `DRS_AUTO, PRESETS, GROUP_KEYS, deepFreeze` | 96-115 | `{quality: [low, medium, high, ultra], look: [natural, vivid, soft]}`, each `{id, name, desc, values}`, deep-frozen. Every Quality preset also lists `DRS_AUTO` = `{renderScale: 0, renderScaleMin: 0.6, sharpen: 0.5}`. `GROUP_KEYS` = the SCHEMA keys of each group (9 quality, 8 look) |
+| `coerce` | 118-128 | `coerce(key, v)`: bools from `true/'true'/1/'1'`; numbers clamped to `RANGE`; a `choice` must be one of its options; non-finite → default |
+| `cfgNum` | 131-135 | the live numeric value of a key, normalised like `coerce` (not a number → default, else clamped to `RANGE`) even if `CFG` was written directly from the console. Allocation-free, used by the frame code |
+| `same, SKEY` | 136-144 | `same` = equal within 1e-6; `SKEY(k)` = `'tc.shader.' + k` |
+| localStorage load | 139 | every CFG key from `tc.shader.<k>`, through `coerce` |
+| `FORMAT_KEY, formatSaved, LEGACY_140` + the 1.4.0 migration | 148-168 | **new.** `tc.shader.format` = `'1.5'` marks a profile already saved by 1.5.0+ (`formatSaved`). Without it, a saved Quality group that is exactly 1.4.0's High or Ultra (shadowSize 4096 plus that preset's extent, filter, every and move, and every other Quality key, including `shadows` and the three render-scale keys, at its default) loses its saved `shadowSize`, so the profile reads as High/Ultra again (2048 plus a near tile instead of a 6144×4096 atlas), and the marker is written. Any other combination is left alone. Idempotent; logged once with `console.info` |
+| `persist` | 170-178 | writes `tc.shader.<key>`, or removes it when it equals the default. With the first non-default value it saves it also writes the `tc.shader.format` marker, so a 1.5 user who picks High and then deliberately sets 4096 is never migrated back |
+| `proto`, `O` | 180-189 | bails out without WebGL2. `O` = 24 original methods: the 18 wrapped ones plus `uniform1i`, `uniform2f`, `uniform4f`, `uniformMatrix4fv`, `bindFramebuffer` and `drawArrays`, so our own calls skip our wrappers |
+| `RAF` + `requestAnimationFrame` wrapper | 194-212 | **new.** Wraps every rAF callback once (a `WeakMap` fn → wrapper, so the game's recurring `step` allocates nothing per frame) to record `RAF.seq`, the callback's start time `t0`, its timestamp `ts` and whether a callback is running (`active`). The game looks `requestAnimationFrame` up at each re-arm (game:frameloop.js:7), so this document-start wrapper is the one it uses |
+| `clamp01, sstep, dot, normInto, mixInto, copy3` | 214-219 | math helpers; the `*Into`/`copy3` ones write into a target array (no allocations) |
+| `patchTerrainVS` | 223-255 | anchors on `uniform vec3 uOrigin;`, `out vec2 vLight;` and the `vec3 p = …*0.0625+uOrigin;` regex. Adds 7 uniforms (`uClsTex, uCam, uTime, uFx, uWaveOn, uLeafSway, uPlantSway`) and **one** output, `out vec4 vTcP` (234): the camera-relative position in `.xyz` and the layer class in `.w`. After `p` it fetches the class (`tcC`, behind `uFx`), writes `vTcP = vec4(p, tcC)` (254), then waves. The class is constant across a face, so the smooth varying interpolates to itself and the FS rounds it. **No `flat`:** the 1.5.0 betas' `flat out float vCls` cost about 2.3-3 GPU ms at rd 12 on the UHD 620 (LAB2), most likely ANGLE D3D11's provoking-vertex geometry shader, which ANGLE adds to any program with a flat varying. smoke forbids the string `flat ` in every terrain shader (`max: 0`), comments included. Since SH4 there is no VS block-light term (`tcBright`/`tcLm`/`vTcBlk`, `uTcSkyL`/`uTcAmbL`) and no `mainEndIndex` |
+| `shadowGlsl` | 263-311 | new: `tcTap` and the two-tile `tcShadow` (below) |
+| `fsDecls(mode)` | 313-365 | the FS uniforms (30, including new `uAmb0, uAmb1, uSunC, uSunK, uGrade, uShadowB, uShadowN` and `uTcLm0`), `in vec4 vTcP;` (349), `tcTone` (now a cubic roll-off instead of `exp`) and `shadowGlsl()`. `tcWv` (the wave function) is added only for mode 2 |
+| `WATER_CODE` | 370-404 | the water model (below), emitted only into the translucent (mode 2) FS |
+| `shadeCode(lit, alpha, mode, fogR)` | 406-496 | replaces the output line (below) |
+| `patchTerrainFS` | 498-514 | `outRe` captures lightmap use and alpha; `cRe` (the `texture(uTex, vUV)` fetch) and `main` must exist. `mode`: 2 = `alpha==='c.a'` (translucent), 1 = has `discard` (cutout), 0 = opaque. `fogR` = the FS declares `uniform vec2 uFogR`. At the top of `main` it unpacks the locals `vec3 vRel = vTcP.xyz; float vCls = floor(vTcP.w + 0.5);` (509), so `shadeCode` reads `vRel`/`vCls` as before. New: `dFdx/dFdy(vRel)` are taken right after the fetch, in uniform control flow before any `discard`, and skipped with effects off |
+| `skyCode`, `patchSky` | 516-559 | inserts `uSkySun/uSkyDay/uFx/uSkyOn` and (new) `uSkyGlow` after `out vec4 o;` and replaces `o=vec4(c,1.0);` (lit) or `o=vec4(mix(uHor,uTop,sqrt(t)),1.0);`. Always patched; it returns the vanilla colour when `uFx` or `uSkyOn` is 0 |
+| `patchCloud` | 561-569 | **dead**: double-escaped regexes and a literal `\\n` in the inserted text (issue 1). Gated by `CFG.cloudEffects` |
+| `patchSource` | 571-583 | dispatcher, needs `#version 300 es`. VS: `aPos & uvec3`. FS: `sampler2DArray`+`vShade`+`uFog`+`vDist`. Sky: `uTop, uHor`. Cloud: `uTint, uHole` |
+| `FIXED_SUN, OBS, CAMLAST, locKind` | 587-597 | observation state. `locKind`: WeakMap<UniformLocation, 1..6> |
+| `setCam`, `onSprite` | 599-604 | camera from the cloud plane's `uCam`; sun = the first `uC` after `uTop` in the frame |
+| `ATL` + indexOf hook | 606-622 | a temporary `Array.prototype.indexOf` wrapper captures the block-name list searched for `'oak_planks'` (game:main.js:366, `eng.texNames`). It restores the original right after the capture, if it's still ours, or after 60 s at the latest |
+| `RE_EMIT, RE_PLANT, nameClass` | 623-631 | name → class: 0 none, 1 leaves, 2 plant, 3 water, 4 emissive. `RE_EMIT` also matches the game's own name `lumen` (glowstone is "Lumen Rock") |
+| `readAtlas` | 633-651 | per-layer transparency and mean RGB from the 16×16 array upload |
+| `layerClass` | 653-676 | class by name, falling back to colour and animation heuristics |
+| `CLS_COUNTS, uploadClasses` | 678-702 | 1-row RGBA8 texture (R = class) on unit 7. It reuses `G.clsData` and uploads, and logs, only when a class changed. Then marks the shadow tiles dirty |
+| `shaderSrc, progShaders, progInfo, PROGS` | 706-709 | WeakMaps: shader → `{orig, info, patched}`, program → shaders, program → `info`. `PROGS` lists every info but is never read (issue 53) |
+| `curInfo, … rec, cols` | 711-715 | per-frame state: `curInfo`, `curVAO`/`curProg` (the main context's bindings, which the shadow pass and the composite put back), `frameId`, `mainGL`, `lastOrigin`, `haveOrigin`. `rec`: Map<VAO, part record>. `cols`: Map<column key, {p0, p1}> (the opaque and cutout records of a chunk column) |
+| `ERR, hookError` | 719-728 | the first 3 hook errors are logged (`STATS.errors` counts them all). After 20 in the page's lifetime (not a rate, issue 54), `ERR.off` pauses the effects until a reload |
+| `U1, U3, V1, V3` | 733-737 | the float and vec3 uniforms pushed to every patched program, and their per-frame values (20 floats and 10 vec3s). Since the 1.5.0 review `uAmbStr`/`uSunStr` are gone (issue 57): `ambientStrength` and `sunStrength` reach the GLSL only through `uAmb0/uAmb1` and `uSunC`. Since SH4 `U1` has no `uTcAmbL` and `U3` has `uTcLm0` instead of `uTcSkyL`; `V3` holds `uSunC` at 21-23, `uSkyGlow` at 24-26 and `uTcLm0` at 27-29 |
+| proto wrappers | 739-850 | `shaderSource, compileShader, attachShader, linkProgram, getUniformLocation, uniform3f, uniform3fv, uniform1f, texImage3D, texSubImage3D` |
+| `bindVertexArray`, `deleteVertexArray` wrappers | 853-859 | track the main context's `curVAO`; deleting a recorded VAO marks its shadow tiles dirty and forgets the record |
+| `vboVao, curABuf`, `bindBuffer`/`bufferData` wrappers, `remeshed` | 865-895 | **new: exact remesh tracking (fixes issue 51).** `gfx.setChunk` binds a part's VBO while its VAO is bound when it creates the part, and re-uploads that VBO with `bufferData(ARRAY_BUFFER, data)` on every remesh, drawn or not. So `bindBuffer` remembers VBO → VAO, **first bind wins** (a remesh rebinds the VBO under whatever VAO is then bound, normally none, which must not re-map it; only object buffers are recorded, so `null` or a stray value is ignored), and `bufferData` gives the part's record its new index count right away (`bytes / 32` quads × 6, capped by the shared index buffer, whose size the `ELEMENT_ARRAY_BUFFER` upload reveals), marking the tiles it is in dirty |
+| `clear` wrapper | 898-901 | the frame tick: `clear(mask & COLOR_BUFFER_BIT)` on `mainGL` only |
+| `cascade, G` | 909-921 | GL resources (`clsTex, clsData, clsW, maxTex, fbo, depthTex, texSize, texW, texH, farX, checkFbo, allocFailed, pOpaque, pCut, shadowOk`), `pCutSolid` (the far tile's leaf program), `dirty`/`dirtyN` (far/near tile), `nSize`, `lastRef` (frame of the last tile redraw), `nearNext` (the near tile is due the frame after a far redraw), and the two tile snapshots made by `cascade()`: `G.sh` = the far, full-range tile (`Twitterentary.shadow`, with `G.sh.near` = `G.nr`), `G.nr` = the near tile. Each holds `valid, drawn, frame, ms, c0, L, R, U, dx, dy, hx, hy, E, Z, size, cull, refresh, why` and (new) `d0`, the `stress({moveSpeed})` drift at its last redraw |
+| `LM_D, lightMat` | 923-933 | ortho light matrix of a tile relative to `at`, from the basis and the extent/depth snapshotted at its last refresh, with the texel snap `dx, dy` |
+| `SUN_LOW … STATS, STRESS, SCRATCH, isEnd, num` | 935-954 | derived per-frame state and counters. `WHY` = `['', init, dirty, move, sun, age, stress]`. `STATS = {shadowChunks, refreshes, why, tiles: {near, far, nearChunks, farChunks}, errors, post}`. `STRESS = {shadowRefreshEvery, forced, moveSpeed, drift, drifted, lastMs}` (`drift` = the emulated camera offset, `drifted` = blocks so far). `isEnd` matches the End's `uSkyLight` (compat-checked) |
+| `updateState` | 956-996 | once per `frameId`, allocation-free: time, cam, `dim`, day = `clamp01(OBS.top[2])` (the zenith's blue channel), sun, `sunL` (y ≥ 0.14), sun colour (`SUN_LOW` → `SUN_NOON`), cloud tint; fills `V1`/`V3` from `CFG`, and, new in 1.5.0, the uniform-only parts of the shading: `uSunK` = day × a horizon fade (0 in the Nether/End), `uSunC` = sun colour × `sunStrength` × `uSunK`, `uGrade` (0 while saturation and contrast are neutral), `uAmb0/uAmb1` (`ambientEnds`), `uSkyGlow` (the sun glow colour × its visibility around the horizon) and last `uTcLm0` (`tcLm0`, 995) |
+| `tcLm0` | 999-1006 | **new in SH4.** `uTcLm0` = the game's `lightmap(vec2(0.0))`, computed per frame on the CPU from the game's own `uAmbient` and `uSkyLight` as observed last frame (`OBS.amb`, `OBS.sl`), with the same curve (`bright`, the warm block tint, the `vec3(0.75)`/0.04 mixes, the 0.5 gamma mix). The lit FS subtracts it from the game's `lightmap(vec2(0.0, vLight.y))` to get the engine's block-light term. This is the only place the curve is still mirrored (at l = 0); compat's `LIGHTMAP` anchor fails if the game changes it |
+| `put3, AMB*, ambientEnds` | 1007-1028 | **new.** The hemisphere ambient's two endpoints (normal down = `uAmb0`, up = `uAmb1`), computed on the CPU once per frame: day with its twilight tint, mixed with night by `day`, or the flat Nether/End colours, times `ambientStrength` |
+| `shadowTargetSize` | 1030-1032 | `cfgNum('shadowSize')` (1024-4096), capped at `MAX_TEXTURE_SIZE` |
+| `NEAR_R, NEAR_SPARE, NEAR_MAX, COS_SUN, SHADOW_AGE_MS` | 1034-1038 | near tile: radius 24 blocks plus its spare margin `max(shadowMove, NEAR_SPARE)` (`NEAR_SPARE` = 8, new in SH4; it was `shadowMove`, i.e. 4 on High and 2 on Ultra), at most 2048 px. The near tile is redrawn once the camera has moved that margin, so High and Ultra now redraw it every 8 blocks. A sun turn of about 0.25° redraws the shadows (1.4.0: 0.17°). Age safety net 10 s (was 2 s, now that remeshes are tracked exactly) |
+| `finalizeShadow(gl, canDraw)` | 1050-1139 | first advances the `stress({moveSpeed})` drift once a frame (0.6/0.8 of the step on x/z, a hitch counts at most 1 s); sets `ST.shadowOn` and decides which tile to refresh (below); snapshots the chosen tile(s) through `snapCascade` (a far redraw that keeps the light basis, `keep` at 1109, leaves the near tile valid); fills `ST.lvp` and the packed `uShadowP`/`uShadowB`/`uShadowN` values. When shaders or shadows are switched off, it shrinks the atlas back to 1×1, once |
+| `camDist, snapCascade` | 1142-1160 | `camDist(cam, C)` (new; replaces `dist3`): the camera's distance from tile C's centre at its last redraw, plus the stress drift since then (`drift − C.d0`, zero without it), used by the two `move` tests. Only the redraw decision sees the drift; the tiles stay centred on the real camera. `snapCascade`: a tile's light basis (`R = L × +Z`, `U = L × R`; the near tile reuses the far tile's `L`), centre, extent, depth, size, culling and texel snap, plus the footprint margins `hx/hy`, and records `d0` |
+| `inFootprint, markDirty, forget` | 1163-1186 | is a part record inside a tile's area (it assumes a 128-tall column centred at y = 64, issue 50)? `markDirty` dirties the tiles a changed caster is in; `forget` drops a record from `rec` and its column |
+| `makeProg`, shadow GLSL, `shadowProg` | 1188-1255 | built with `O.*`, bypassing the patcher. `SHADOW_VS_OPAQUE`/`FS_OPAQUE` are depth only, with an empty FS. `SHADOW_VS`/`FS` do the cutout alpha test against the atlas, and plants and water (classes 2-3) are culled. New: `SHADOW_VS_LEAVES` keeps only leaves (class 1), drawn by `pCutSolid` with the depth-only FS, so the far tile's leaves are solid quads with no alpha test (LAB: about 15% cheaper redraws); the near tile alpha-tests them (holed leaf shadows). `shadowProg` sets `uClsTex = 7` and `uTex = 0` |
+| `initGL` | 1260-1314 | on the game's first `useProgram` of a patched program (in `prog()`, game:gfx.js:876, during the `Gfx` constructor). Sets `mainGL`, `maxTex`, `clsTex` on unit 7, a **1×1** `DEPTH_COMPONENT16` compare texture on unit 6, the shadow FBO and the three shadow programs, whatever `CFG.shadows` is. Then `initPost` (the composite program and its VAO; a failure there only disables render scale, `postFail`), and last `initTimer` (the GPU timer queries, independent of `initPost`) |
+| `resolveLocs` | 1316-1335 | per program, once: the uniform locations, then the samplers (`uShadowMap = 6`, `uClsTex = 7`); allocates the value caches |
+| `applyUniforms` | 1337-1362 | `resolveLocs` first, so the samplers are on units 6/7 even if something below throws on a program's first use; then `updateState`; `uploadClasses` when dirty; uploads each `U1`/`U3` value only if it differs from the program's cache; `pushCam` only once the frame's camera is final (`ST.camFrame === frameId`) |
+| `pushCam, pushMat, push4` | 1364-1389 | cached `uCam`, `uShadowOn`, and while shadows are on the far tile's light matrix `uLVP` and the packed `uShadowP`/`uShadowB`/`uShadowN` vec4s; `pushMat`/`push4` upload only on change |
+| `offProgram` | 1393-1403 | the paused path: `uFx = 0` and the two samplers, once per program |
+| `useProgram` wrapper | 1405-1416 | `initGL` once, `curInfo`, `curProg`, `OBS.lit`, then `applyUniforms` (or `offProgram`) |
+| `resizeShadow` | 1419-1429 | `texImage2D` of the depth atlas on unit 6 at `(near size + far size) × far size`, restoring the active unit; flags an FBO check |
+| `drawShadowSet` | 1431-1448 | one draw per record of a pass (opaque or cutout) inside a tile. Casters inside it keep casting however long ago they were drawn (behind the camera, for example); records outside the full map that haven't been drawn for 60 s are forgotten (a leak guard) |
+| `renderShadow` | 1453-1494 | the shadow pass (below) |
+| `drawTile` | 1495-1511 | one tile: viewport and **scissor** to its rectangle of the atlas, culling from its snapshot, `clear(DEPTH)`, opaque then cutout records (`pCutSolid` for the far tile when there are two); counts `STATS.refreshes`, `STATS.tiles` and the reason |
+| `trackColumn` | 1516-1533 | when a column's opaque or cutout part is drawn without its sibling, the sibling's mesh became empty: forget it (and mark its tiles dirty) |
+| `terrainDraw` | 1535-1576 | the frame's first terrain draw rebuilds the camera from `uOrigin` deltas, then runs `finalizeShadow(gl, mode < 2)`, `renderShadow` and `pushCam`. A throwing `renderShadow` is caught: no shadows that frame, the tiles are invalidated, `hookError`, and `pushCam` still runs. Every opaque/cutout draw updates its record (a new record in a tile marks it dirty), then `trackColumn` |
+| `drawElements` wrapper | 1578-1584 | calls `terrainDraw` when `curInfo.terrain && curVAO && haveOrigin && !ERR.off` |
+| `POST, SC, VP, PF` | 1595-1603 | **new.** `POST` = `STATS.post` (`{active, ok, composites, frame, w, h}`). `SC`: the scene FBO, its colour and depth textures (`tw × th`), this frame's scene and canvas sizes, the composite program and its cached uniforms. `VP`: the viewport the game's frame currently draws with, so the shadow pass needs no `getParameter(VIEWPORT)`. `PF`: per-frame timing (`pending`, `inRaf`, `dt`, `t0`), this frame's scale `s` and `id`, the count of game frames started (= `PERF.frame`; it tags the timer queries and `GOV.cf`) |
+| `MIN_W, MISS_MS, CPU_BOUND_MS`, the GPU marks, `GOV_AGE_MS, GOV_SETTLE, GOV_UNDO_MS, GOV_PIX, COMP_MS` | 1604-1619 | canvases under 640×360 (the `.pix` menus) render directly; a frame over 17.5 ms missed 60 Hz; a rAF callback over 12 ms is CPU-bound. **GPU marks (SH4):** uncapped, drop above `GPU_HIGH_MS` 12.7 and raise only under `GPU_BUDGET_MS` 12.0 (GPU median; the uncapped p95gb sits about 3.5-4 ms above it); capped (cadence `≥ CAPPED_MS` 15.5 ms) `GPU_HIGH_CAP_MS` 14.2 / `GPU_BUDGET_CAP_MS` 13.5 at 60 Hz, scaled with the cadence (twice that at 30 Hz), because under a 60 Hz cap the UHD 620 clocks down in the idle gaps and the same frame reads about 1.5 ms more (LAB2). `GOV_AGE_MS` 30 s = how long a scale's measured median counts for predictions (all three on one line, 1615, which govsim extracts); **`GOV_SETTLE` 4 (SH5)** = the frames after a scale change whose GPU samples are skipped; **`GOV_UNDO_MS` 4 s (SH5)** = a drop this soon after a raise undid it and doubles `backoff`; `GOV_PIX` 0.5 = the prior share of GPU time that scales with pixels (LAB2 measured about 0.35 at rd 12); `COMP_MS` 0.6 = the prior cost of the scene buffer + composite at 1920×1080 (none at scale 1) |
+| `COMP_VS, COMP_FS` | 1621-1664 | the composite: a full-screen triangle from `gl_VertexID` sampling the scene texture on unit 8 (`uTcScene`), with `uTcScale`, `uTcTexel` (1 / texture size, and the highest UV inside the rendered rectangle), `uTcSharp` and `uTcCheap`. The sharpen is the centre tap plus two diagonal half-texel bilinear taps (each a 2×2 box), with a CAS-style adaptive negative lobe from the green channel (LAB on the UHD 620 at 1080p: about 0.85 ms, against about 1.6 ms for a 5-tap RGB CAS with the same acutance). `sharpen = 0` is a single bilinear tap (about 0.65 ms, the bandwidth floor). `uTcCheap` (Auto at its lowest scale) is one tap with the sub-texel fraction contrast-boosted (about 0.6 ms; crisper block edges, no halo) |
+| `TQ_N, TQ, PERF, PT, GOV, BREC, BREC_MAX_MS` | 1669-1698 | `TQ`: a ring of `TQ_N` = 128 `TIME_ELAPSED` queries (`EXT_disjoint_timer_query_webgl2`), each tagged with its frame id and scale. `PERF` = `Twitterentary.perf`. `PT`: the 250 ms perf window and the refresh history for refreshes/min. `GOV`: the Auto governor (scale, a 10-frame window of intervals `iv`, each paired in `cp` with the callback that **preceded** it (`pc` = the last frame's callback time), `lastChange/lastMiss/lastRaise`, `backoff`, `drops`, `raises`, the refresh-interval estimate `lo/cn/cq/cqi/vs` and (SH4) the cadence `cv`/`rf` the GPU marks follow, below). **GPU level (SH4):** `gr` = the last 16 GPU samples taken at the current scale (`gs` is the sort scratch), `gpu` = their median (it was an EMA with α = 0.1), `gpuN` = samples since the last scale change, `gpuAt` = the time of the last one. **Per-scale table (SH4):** `tg`/`tn`/`tt` on the 0.05 grid from 0.5 (index 0) to 1 (index 10) = the median when that scale was last measured, its sample count and when. `px` = the canvas's pixel count, for `COMP_MS`. **SH5 (1693):** `cf` = `PF.id` at the last scale change or `govReset` (the settle filter in `timerPoll`), `lastReal`/`prevReal` = the times of the last two frames that really missed their refresh (the capped drop rule, below). `BREC`: the bench recorder: `dt` keeps the first 16384 intervals (percentiles), `m` counts every interval (the means: `dtSum`, `scale`), and intervals up to `BREC_MAX_MS` = 5000 ms count, so very slow renderers still get a row |
+| `initPost, initTimer, postFail` | 1700-1736 | `initPost`: compile the composite program (sampler on unit 8) and its empty VAO. `initTimer` (new): the ring of `TQ_N` timer queries if `EXT_disjoint_timer_query_webgl2` exists (all or none: a failed `createQuery` leaves `TQ.ok` false), then `PERF.timer`; separate from `initPost`, so a composite that fails to compile keeps the GPU timing. `postFail`: any scene-buffer error turns render scale off for the session (`POST.ok = false`). Whenever `SC.fbo` exists it binds the default framebuffer and sets the viewport to the full `gl.canvas` size, even when `SC.bound` was already cleared (a composite that threw before its own unbind) |
+| `scaleSetting` | 1739-1743 | the fixed render scale (0.5-1), or 0 for Auto |
+| `allocScene, texParams` | 1746-1776 | (re)allocates the scene colour (`RGBA8`, `LINEAR`) and depth (`DEPTH_COMPONENT24`, `NEAREST`) textures when the canvas outgrows them or shrinks under half their area, not per frame. Unit 8 keeps the colour texture bound afterwards; `getParameter(ACTIVE_TEXTURE)` and `checkFramebufferStatus` run only here |
+| `frameStart` | 1780-1807 | called from the frame's viewport (below): times the frame, queues `frameEnd` as a microtask, records `GOV.px` (1795), starts the GPU timer, and either renders directly (scale 1, shaders off, paused, failed, small canvas) or binds the scene FBO and sets the viewport to `ceil(w·s) × ceil(h·s)` |
+| `frameEnd` | 1810-1825 | the microtask after the game's whole rAF callback: `composite`, then ends the timer query, polls finished ones, and runs `govern` and `perfFrame` |
+| `composite` | 1831-1872 | draws the scene to the canvas, then restores exactly what it changed: program, VAO, the four capabilities (read with `isEnabled`), framebuffer and the full-canvas viewport. It never touches the active texture unit. After each allocation it checks `getError` twice |
+| `timerBegin, timerPoll` | 1874-1898 | one query per frame from the ring of 128, polled (up to 32 per frame) and never blocking. Results arrive 0.25-1.5 s late on the UHD 620 with D3D11. They feed `PERF.gpuMs` (still the mean over each 250 ms window) and `PERF.gpuRing`, the bench, and, through `govSample`, the governor's median (1896): only samples taken at the frame's scale while shaders are on and not paused, and only when that scale is the governor's own (`PF.s === GOV.s`, or a direct frame at `GOV.s ≥ 0.999`), so direct frames with K off, after errors or on a small canvas never file vanilla-cost samples under `GOV.s`. **Since SH5** it also skips the first `GOV_SETTLE` = 4 frames after a scale change or a `govReset` (`TQ.f[i] > GOV.cf + GOV_SETTLE`): the scene buffer turning on or off and a GPU clock still settling made them read 1-2 ms high under vsync, and the drops they caused undid raises half a second later. `PERF.gpuMs`, `gpuRing` and the bench still get every sample |
+| `govSample, govIdx, govPredict, govFits` | 1900-1940 | **new in SH4.** `govSample(ms, now)`: stores a sample in `GOV.gr` and sets `GOV.gpu` = the median of the last 16 (an insertion sort into `GOV.gs`, allocation-free); from the 5th sample on it also writes the current scale's table entry. `govIdx(s)` = the table index of a scale. `govPredict(u, now)` = the GPU ms predicted at scale `u`: the measured entry if `govFits`, else `a + b·u²` through the current level, with `b` from the consistent measured scale farthest from the current one (or the prior `GOV_PIX` share), clamped between 0 and `bmax` (all of the GPU time scaling with pixels); `COMP_MS` (by canvas pixels) is added below scale 1 only. `govFits` = an entry is fresh (5+ samples, under `GOV_AGE_MS`) and consistent with the current level: GPU time rises with the scale, at most as fast as the pixel count, ±0.75 ms. An entry measured in other conditions (a preset-switch transient, another view) is ignored, so it can't hold the scale down or up |
+| `setScale, govFresh, govHelps, govReset, govern` | 1942-2111 | the Auto governor (below). `setScale` (1942) clears the median window and, since SH5, sets `GOV.cf = PF.id` (1944). `govFresh(k, now)` (1950, review round) = table entry k has 5+ samples within `GOV_AGE_MS`. `govHelps(v, s, now, skip)` (1951-1961, review round) gates the capped blind one-step drop from s to v: false when a fresh entry shows v is not 0.3 ms cheaper than now, or (below 1) the scale above, where it came from (1.0 with the 0.95 skip), is not 0.3 ms costlier. `govReset` (1962) also clears the table (`tn`, `tt`) and, since SH5, `lastReal`/`prevReal` (1964) and sets `GOV.cf = PF.id` (1963), so the settle skip applies after a reset too |
+| `govTable, postPossible` | 2114-2123 | `govTable()` (new in SH4) = `{'0.85': ms, …}` for the fresh table entries, shown as `debug().governor.measured`. `postPossible`: could this frame use the scene FBO at all (setup, canvas size)? Auto idles while it can't |
+| `perfFrame` | 2125-2157 | per frame: accumulates intervals (under 1 s), callback (CPU) times and the bench recorder (intervals under `BREC_MAX_MS`). Every 250 ms it publishes `PERF` in place (fps, ms, cpuMs, gpuMs, scale, cpuBound = cpuMs > 12, shadow refreshes per minute over about 5 s, timer); a GPU-disjoint period discards that window's GPU samples |
+| `viewport` wrapper | 2159-2178 | on `mainGL`, the first full-canvas `viewport(0, 0, canvas.width, canvas.height)` since the last frame ended is `gfx.draw`'s frame start → `frameStart`. A later full-canvas viewport in the same frame is redirected to the scaled size while our FBO is bound. Every other call is tracked in `VP` and passed through |
+| `BENCH_DEFAULTS, BENCH_SETTLE, benchOpts, BENCH_MOTIONS, parseScenario` | 2182-2221 | `{seconds: 6, warmup: 2, scenarios: [current, off, low, medium, high, ultra]}`, 0.5 s settle per scenario. `parseScenario` uses `npm run bench`'s grammar: `off`, `current` or a Quality preset, `+key=value`…, then one motion suffix. `BENCH_MOTIONS` (new) maps the suffix to `stress()` options: `-moving` = `{moveSpeed: 11}` (creative flying), `-sprint` = `{moveSpeed: 22}` (sprint-flying), `-stress` = `{shadowRefreshEvery: 4}` (a forced redraw every 4 frames, the worst case; this is what `-moving` meant before). `vanilla` and unknown names give an `n/a` row with a note |
+| `lsSnapshot, lsRestore, r3, naRow, benchRow, benchEnv` | 2223-2267 | every `tc.shader.*` key saved and restored exactly; a row = `{name, fps, ms, p95, low1, cpuMs, gpuMs, scale, refreshPerMin, note?}` (the means divide by `BREC.m`, the percentiles use the stored `n`; GPU only when at least half the frames have a timer sample; note `cpu-bound` when cpuMs > 12); `env = {gpu, w, h, dpr, version, timer}` |
+| `BCTL, benchWait` | 2270-2271 | **new.** The running bench's control object (`{aborted, restored, wake, timer, restore}`, null when idle); `benchWait(ctl, ms)` is a timeout that `abort()` can wake early (it replaced `sleep`) |
+| `bench` (+ `running`, `defaults`, `estimate`, `abort`) | 2276-2341 | the in-place benchmark (below). `bench.abort` is at 2331 |
+| `stressSet, stressInfo, stress` | 2350-2372 | `stress({shadowRefreshEvery: n, moveSpeed: v})`, in memory only. `shadowRefreshEvery` (capped at 3600) forces redraws (reason `stress`): with two tiles the near tile every n frames and the far tile every `max(60, 15n)` (its near half on the next frame), a single map every n. `moveSpeed` (new, blocks/s, capped at 1000) emulates a horizontally moving camera for the redraw decision only, so the real rules decide what redraws (reasons `move`). Each call sets both (an option left out is off), so `stress({})` turns everything off; turning `moveSpeed` off also zeroes the drift and both tiles' `d0`. Returns `stressInfo()` = `{mode: 'off'/'shadowRefreshEvery'/'moveSpeed'/'both', shadowRefreshEvery, moveSpeed, forced, drifted}` |
+| `apply, set, applyPreset, currentPreset, reset` | 2381-2424 | the settings API (below) |
+| `debug` | 2426-2448 | diagnostics: version, frame, sun, cam, shadow state, `refreshWhy`, `shadowMap` size, `records`, `remeshes`, `errors`, `paused`, `post` (with texture size and allocations), `perf`, `governor` (`{scale, mode, backoff, drops, raises, gpuMs, refreshMs, measured}`; `gpuMs` = `GOV.gpu`, since SH4 the median of the last 16 samples at the current scale, not an EMA; `refreshMs` = `GOV.vs`; `measured` = `govTable()`, new in SH4), `stress` (= `stressInfo()`), `preset`, layer classes |
+| `window.Twitterentary` | 2449-2453 | the global (below) |
+| `notify` | 2455-2466 | `__tcOptions.toast` when BO is there, else its own `#note` toast (1.8 s) |
+| K listener | 2467-2478 | KeyK toggles `enabled` through `set` (saved), with the guards in §1. Ignored while `bench.running`, so K can't change a scenario mid-measurement (or be undone by the bench's restore) |
 
-**`window.Twitterentary`** (1338-1342)
+**`window.Twitterentary`** (2449-2453)
 
 | Member | What it is |
 |---|---|
 | `cfg`, `schema`, `defaults`, `presets`, `version` | live `CFG`, `SCHEMA`, the frozen `DEFAULTS` and `PRESETS`, and `VERSION` |
-| `state`, `stats`, `shadow`, `obs` | `ST`, `STATS`, `G.sh` and `OBS`, for diagnostics and the smoke checks |
+| `state`, `stats`, `shadow`, `obs` | `ST`, `STATS` (now with `tiles` and `post`), `G.sh` (the far tile; `shadow.near` = the near tile) and `OBS`, for diagnostics and the smoke checks |
+| **`perf`** (new) | `PERF`, mutated in place every 250 ms, never replaced: `{fps, ms, cpuMs, gpuMs, scale, cpuBound, shadowRefreshPerMin, timer}`. `ms` = the mean frame interval; `cpuMs` = the mean time inside the game's rAF callback; `gpuMs` = the mean GPU time from the timer queries (`null` without the extension); `scale` = the current render scale; `timer` = the GPU timer is available. Also, for `npm run bench`: `gpuRing` (`Float32Array(256)`, per-frame GPU ms, NaN = unknown or disjoint), `gpuRingFrame` (`Int32Array(256)`, the game-frame id of each sample), `gpuFrame` (samples written; index = `gpuFrame & 255`) and `frame` (the id of the game frame most recently started, incremented at its viewport). Samples arrive late (0.25-1.5 s on the UHD 620 with D3D11). BO's overlay reads the summary fields |
+| `stats.post` (new) | `{active /* scene FBO used last frame */, ok /* false once disabled after an error */, composites, frame, w, h /* scene px last frame */}`, mutated in place |
 | `set(key, v)` | `coerce`, write `CFG`, `persist`; it takes effect on the next frame. Returns false for an unknown key. Hidden keys (`shadowDepth`, `shadowCull`…) are accepted too |
-| `apply()` | a no-op since the reviewer fixes, kept for API compatibility (BO calls it after a fallback write). Uniforms are rebuilt from `CFG` every frame, and the shadow map compares its settings with its last snapshot, so nothing needs marking |
-| `applyPreset(group, id)` | sets **every** key of the group: the preset's value, or the default for keys it doesn't list (Low lists only `shadows: false`). Then persists them |
-| `currentPreset(group)` | the id of the first preset whose listed values all match `CFG` (within 1e-6), else `null` ("Custom"). Low matches whenever `shadows` is off |
-| `reset()` | `CFG` = `DEFAULTS`, removes **every** `tc.shader.*` key (including stale ones such as `shadowTaps`) |
+| `apply()` | a no-op, kept for API compatibility (BO calls it after a fallback write). Uniforms are rebuilt from `CFG` every frame, and the shadow tiles compare their settings with their last snapshots, so nothing needs marking |
+| `applyPreset(group, id)` | sets **every** key of the group: the preset's value, or the default for keys it doesn't list. Then persists them. Quality now includes the three Performance keys |
+| `currentPreset(group)` | the id of the first preset whose listed values all match `CFG` (within 1e-6), else `null` ("Custom"). Low matches whenever `shadows` is off and the render-scale keys are at their Auto defaults |
+| `reset()` | `CFG` = `DEFAULTS`, removes **every** `tc.shader.*` key (including stale ones such as `shadowTaps`, and the `tc.shader.format` marker; `formatSaved` is cleared too) |
+| **`bench(opts)`** (new) | `bench({seconds = 6, warmup = 2, scenarios = [current, off, low, medium, high, ultra]} = {})` → Promise of `{env: {gpu, w, h, dpr, version, timer}, rows: [...]}`. Runs where the player stands. `bench.running` (bool) and a second call rejects while one runs; `bench.defaults`; `bench.estimate(opts)` = seconds it will take. An aborted run resolves with `aborted: true` added |
+| **`bench.abort()`** (new) | stops a running bench. Before it returns, it restores `CFG`, every `tc.shader.*` key byte-identically, the stress state and the governor, and sets `running` to false. The bench promise then resolves (never rejects) within a microtask with `{env, rows /* finished rows only, maybe [] */, aborted: true}`; the window being measured is discarded. Returns true if it stopped a bench, false when idle or on a second call. A new `bench()` can start right away. BO's Escape key on its benchmark screen calls it |
+| **`stress(opts)`** (new) | the in-memory debug hook above (`shadowRefreshEvery`, `moveSpeed`); returns its state, which is also `debug().stress` |
 | `debug()` | logs and returns the diagnostics object |
 
-**Shadow refresh** (`finalizeShadow` 838, `renderShadow` 1153):
-- **When shadows are on** (840-841): `enabled && shadows && shadowOk`, the size hasn't failed to allocate, the overworld (`dim 0`), sun y > 0.06 and day > 0.1.
-- **When they're off:** the map is invalidated. If `enabled` or `shadows` is off (Quality Low, or K), the depth texture is also shrunk back to 1×1, once (844-852). At night and in the Nether/End it keeps its size, so it isn't reallocated every dusk.
-- **When the first terrain draw is translucent** (`canDraw` false, 854-857): no refresh starts. The old map is kept, or shadows are off for that frame if it isn't valid.
-- **Reasons** (`ST.why`, counted in `STATS.why` once drawn), checked in this order:
-  - `init`: there's no valid map;
-  - then, at most once every `shadowEvery` frames (859):
-    - `dirty`: `G.dirty`, or the normalised size, extent, depth or culling differs from the snapshot (860). This is how setting changes are noticed;
-    - `move`: the camera moved more than `shadowMove` (861);
-    - `sun`: the sun turned about 0.003 rad (`dot < 0.9999955`, 862);
-    - `age`: the map is more than 2 s old (863).
-- **What sets `G.dirty`:**
-  - a new record, or a changed index count, inside the footprint (1260);
-  - `trackColumn` dropping an emptied part (1214, 1218);
-  - `deleteVertexArray` on a recorded VAO in the footprint (755);
-  - a class re-upload (601).
-  - Settings changes don't set it (`apply()` is a no-op), so dragging a Look slider causes no shadow redraws.
-- **Cost in practice:** SH measured a refresh mix on the idle title world (48 frames over 11 s) of dirty 5, age 1, move 0, sun 0.
+**Scene framebuffer, composite and the Auto governor** (new in 1.5.0):
+1. **Frame start.** `gfx.draw` begins every frame with `viewport(0, 0, v.w, v.h)` = the canvas size. That is the game's only `viewport` call on the main context, and the game never binds a framebuffer (game-rendering.md §3). The `viewport` wrapper takes the first such call since the last frame ended as the frame start (`frameStart`):
+   - It works out the frame's interval and the rAF callback's start from `RAF`, and queues `frameEnd` with `queueMicrotask`.
+   - It begins a GPU timer query.
+   - The scale `s` is the fixed setting, or the governor's scale on Auto. The FBO is used only when `s < 0.999`, shaders are on, effects aren't paused, the post path hasn't failed, and the canvas is at least 640×360.
+   - If so, it binds `SC.fbo` (allocating it when the canvas outgrew it) and sets the viewport to `ceil(w·s) × ceil(h·s)` itself. Everything the game draws in that rAF callback lands in the scene buffer at that size: sky, terrain, entities, overlays, and also the survival crack, hands and fire overlay after `gfx.draw`. The hand pass's `clear(DEPTH)` clears the scene depth.
+2. **Composite.** The microtask runs right after the game's rAF callback returns (after the HUD's 2D draw, before the frame is presented). `composite` binds the default framebuffer, sets the full viewport and draws the scene colour from unit 8 with the composite FS (a 3-tap adaptive sharpen of strength `sharpen`, or one contrast-boosted bilinear tap while Auto sits at its lowest scale). Then it restores the program, VAO, capabilities and full viewport, so the GL state after a frame is the same as a direct frame's. The 2D HUD canvas and the nametags (`gfx.project`, full `w/h`) are untouched.
+3. **Fallbacks.** At scale 1, with shaders off or paused, in the tiny `.pix` menus, or after any error (`postFail`: render scale is off for the session), the frame renders directly, exactly as in vanilla.
+4. **Canvas changes.** The scene textures follow `canvas.width/height` at every frame start, so the game's `resize()` and its `regainCanvases()` (game-core.md §4) need no special handling.
+5. **Auto governor** (`govern` 1984, after each frame):
+   - It keeps a 10-frame window of frame intervals, each paired with the callback that **preceded** it (`GOV.pc`, the last frame's callback time). An interval ends at this frame's start, so after one of the game's long JS callbacks the next frame starts late however light the GPU is: that frame is CPU-bound, not a GPU miss.
+   - **Timed mode** (Chrome on D3D11 has the timer): at least 5 GPU samples taken at the current scale, the latest under 2 s old.
+     - **The GPU level is a median** (SH4, `govSample`): the median of the last 16 samples at the current scale. The old α = 0.1 EMA was dragged over the high mark by external GPU spikes (bursts of 2-5 samples at 20-37 ms every 0.5-1 s, present in vanilla too: Chrome, DWM or the driver), so 1.5.0's pre-SH4 Auto settled at 0.60-0.70. `debug().governor.gpuMs` shows the median; `perf.gpuMs` is still the 250 ms mean.
+     - Because results arrive up to about 1.5 s late, after a change it waits for samples at the new scale before deciding anything. **Since SH5** the samples of the first `GOV_SETTLE` = 4 frames after a change (or a `govReset`) don't count either (`timerPoll`, 1896): under vsync they read 1-2 ms high.
+     - If no sample arrives for 5 s (the timer stopped resolving), it falls back to the frame-miss rules. While the samples for a new scale are still on their way, misses don't count at all.
+   - **Per-scale table and predictions** (SH4, `govPredict` 1920): each scale's median is remembered for `GOV_AGE_MS` (30 s) on a 0.05 grid. A raise or drop predicts the target scale's GPU time from that table while the entry fits the current level (`govFits`), else from an `a + b·s²` fit. At rd 12 only about a third of the GPU frame scales with pixels (LAB2's forced-scale sweep on High: about 8.6 ms fixed and 4.4 ms of pixels at scale 1), so the old "all GPU time scales with the pixel count" prediction made raises look far too costly. Below scale 1 the prediction adds the scene buffer + composite (`COMP_MS`): just below 1 they cost about what the pixels save (LAB2: 0.95 read the same as 1.0).
+   - **Refresh-interval estimate** (for the no-timer rules): `GOV.lo` keeps the 7 shortest intervals of the current block of 64 frames (`cn` counts them), so `lo[6]` is the block's 10th percentile; `cq` holds that percentile for the last 4 blocks (`cqi` = the next slot) and `vs` = their minimum, the display's refresh interval or Chrome's cap. It starts at 60 Hz (16.7 ms). At 60 Hz, on faster screens and uncapped it stays at or below 16.7 ms; a 30 Hz cap (Chrome's Energy Saver, a 30 Hz screen) is recognised after 4 blocks, about 8.5 s. `debug().governor.refreshMs` shows it (unchanged by SH4).
+   - **Cadence for the GPU marks** (SH4, 2003): `cv` = the median of the 4 block percentiles (at most 50 ms), which is robust to the 3-8 ms catch-up intervals LAB2 saw at a 60 Hz cap. `rf` follows a faster `cv` at once and a slower one only while the GPU median is under half of it (2010): a GPU that no longer fits one refresh doubles the frame time, and that must not raise its own marks.
+   - **The marks** (2015): uncapped (`rf` < 15.5 ms) drop above 12.7 and raise under 12.0 ms; capped, 14.2 / 13.5 ms at 60 Hz, scaled by `rf` / 16.67 (28.4 / 27 ms at 30 Hz).
+   - A frame "misses" when its interval is over the miss threshold and the callback before it took under 12 ms. The threshold is 17.5 ms with fresh GPU samples; without them it is `max(17.5, 1.05 × vs)`: unchanged at 60 Hz, about 21 ms at 50 Hz and about 35 ms at 30 Hz, so a capped display aims at its own rate instead of sitting at `renderScaleMin`. A longer callback is a CPU-bound frame (meshing, the game's JS bursts), which a lower resolution can't help.
+   - **Real misses** (SH5, 2026): a frame whose interval is over `max(17.5, 1.05 × rf)` (the cadence the marks follow: about 35 ms at a 30 Hz cap) after a callback under 12 ms, whatever the GPU reads. `lastReal`/`prevReal` keep the times of the last two. Only the capped drop rule below uses them.
+   - **Drop over the high mark** (timed, 2049-2050): needs a median of 8 or more samples above the high mark, plus 0.2 ms to leave scale 1. **Since SH5** it needs the full window of 16 when the last change was a raise (`g.lastRaise === g.lastChange`): 8-sample medians read 1-2 ms high often enough to undo most raises under vsync. That test also holds for the first drop after load or a `govReset` (both are -1e9), which the review round documented as deliberate: govsim's start-up case did better with it. (Requiring 16 for every drop made govsim's start-up transient case worse, 0.88 → 0.82, so it applies only then.) It goes to the highest scale at most 0.25 lower that is predicted under the budget; else one step, if that is predicted to save at least 0.3 ms; else it stays, because lower scales measured no cheaper (the frame is bound by its draws or the CPU, not its pixels). While staying it even raises one step when that scale was measured no more than 0.25 ms costlier; capped, since the review round (v9, 2077), only when it measured no costlier at all, a 0.3 ms dead band against `govHelps`' blind drop (below), so the two can't take turns in a 1.0 ↔ 0.9 cycle. Expected and acceptable: a draw-bound frame at 1.0 with steady real misses re-tries 0.9 about every 30 s, once 0.9's table entry ages out (`GOV_AGE_MS`).
+   - **Capped (`rf` ≥ 15.5 ms), since SH5:** the drop over the high mark also needs **two real misses in the last 2 s, both after the last scale change** (`now − prevReal < 2000 && prevReal > lastChange`, 2050; the second condition is from the review round, so one pair of misses can't justify two drops in a row), and it goes **at most 0.1 down** (the search stops after 2 steps, 2055). The one-step fallback needs no predicted saving, since the frame really missed, but since the review round it drops only if `govHelps` allows it (2066): it stays when a fresh measurement shows the lower scale is not 0.3 ms cheaper than now, or the scale above it came from is not 0.3 ms costlier. So a draw-bound frame keeps its scale instead of ratcheting down to `renderScaleMin`, and the 1.0 ↔ 0.9 cycle is avoided. Real misses mean there is no clock-down slack, so those measurements are honest. Reason: under 60 Hz vsync the UHD 620 clocks down with slack until the frame nearly fills the refresh (DVFS), so the same High at 1.0 read 12.7-14.8 GPU ms with no misses. The GPU time, and the predictions made from it, over-read the load, and Auto drifted down to 0.6-0.85 for nothing. The cadence-based threshold makes the rule work at 30 Hz too. Uncapped drops are unchanged apart from the 16-sample rule, the backoff and the 0.95 skip.
+   - **Drop on misses**, down to `renderScaleMin`, rounded down to a 5% step, by 5% (10% when 6 or more of the 10 missed):
+     - timed: 5 of the last 10 frames missed while the GPU median is over the budget (so the game's JS bursts or a single shadow redraw don't count);
+     - no timer: 3 of the last 10 frames missed.
+   - **Raise**, after 2 s × `backoff` without a miss or a drop over the high mark:
+     - timed: two steps when both are predicted more than 0.5 ms under the budget (onto 1 this way only when 0.95 is skipped, i.e. 0.85 → 1; 2099-2101); else one step if it is predicted under the budget, or was measured no more than 0.25 ms above the current level; else, from 0.85 or more, straight to 1 when 1 is predicted under the budget (scale 1 skips the composite);
+     - uncapped without a timer: one step if the mean interval × (area ratio) < 15.5 ms;
+     - vsync-locked without a timer: it simply probes one step.
+   - **No 0.95 step in Auto** (SH5, `skip`, 2030) while `renderScaleMin` ≤ 0.9 (every preset: 0.6): raises from 0.9 go to 1, every drop from 1 lands at 0.9 or lower (the search skips 0.95, and a one-step or miss drop that would land there goes to 0.9), and the two-step raise from 0.85 may go to 1. At 0.95 the scene buffer and composite cost what the pixels save: it measured the same as 1.0 in every LAB2 and SH5 run (13.14/13.2, 12.93/12.95, 14.41/14.7 ms), so it was only a step to hunt on. A fixed `renderScale` of 0.95 is untouched, and SCHEMA is unchanged.
+   - At most one change per 0.5 s. A drop that undoes a raise doubles `backoff` (up to 8×, so the next raise waits up to 16 s), which resets after 30 s without misses. "Undoes" means within 3 s without a timer and, since SH5, within `GOV_UNDO_MS` = 4 s with it, for both kinds of drop (2069, 2082); before SH5 the timed path never backed off.
+   - It idles with a fixed scale, shaders off, a failed post path, or a canvas too small for the FBO. `bench()` resets it (`govReset`, which also clears the per-scale table) before every scenario.
+   - **Measured (SH4, `reports/bench-sh4-final2.json`, UHD 620, rd 12, FOV 80, 1080p, repeat 1):** Auto Low, Medium and High settle at 1.00 and Ultra at 0.90, every row holding 60 (worst p95gb 15.99 ms, Ultra); before SH4, High settled at 0.70 and Ultra at 0.62.
+   - **Measured (SH5, 60 Hz vsync, 40 s rows, rd 12 / FOV 80 / 1080p; miss% / mean scale / scale changes per minute):** High 0.42 / 0.91 / ~39 → 0.17 / 0.994 / 3.0; Ultra 0.00 / 0.95 / ~36 → 0.17 / 0.994 / 3.0; Ultra-moving 0.00 / 0.87 / ~45 → 0.59 / 0.985 / 6.0 (one real overload episode, plus one 167 ms game hitch); High-moving 0.00 / 1.000 / 0; off unchanged. Before SH5 Auto hunted in a 0.85-0.9-0.95-1 sawtooth at 36-45 changes/min. Uncapped (`reports/bench-sh5-v7.json`, median / p95gb2 / scale): High 11.0 / 14.45 / 0.85, Ultra 12.0 / 15.30 / 0.94, Medium 11.5 / 15.10 / 0.89 (`reports/bench-sh5-medium.json`). Uncapped High can sit at 0.85 (issue 65).
+   - At Auto's lowest scale the composite switches to its cheap one-tap mode (`uTcCheap`), because that is when the GPU is busiest.
+
+**`bench()`** (2276-2341): for each scenario, in place and in memory only:
+1. `CFG` is reset to the snapshot taken at the start, then the scenario's values are applied (a Quality preset sets all 9 quality keys and `enabled`; `+key=value` goes through `coerce`); the motion suffix sets `stress()` through `stressSet` (`-moving` = moveSpeed 11, `-sprint` = 22, `-stress` = shadowRefreshEvery 4; no suffix = both off).
+2. `govReset()`, then a wait of warm-up + 0.5 s, then `seconds` of recording into `BREC` (frame intervals, CPU and GPU ms, scale, refreshes). Every wait is a `benchWait` that `abort()` wakes.
+3. The row comes from the recording; `n/a` rows carry a note.
+- `ctl.restore` restores every `CFG` value, every `tc.shader.*` key exactly (`lsRestore`), both stress options and the governor, then re-reads `formatSaved` from localStorage (the restore may have removed the `tc.shader.format` marker). It runs once: in the `finally`, so an error can't leave settings behind, or earlier from `bench.abort()`. A second call while one runs rejects.
+- **Abort** (`bench.abort()`): the loop stops at its next check, the window in progress is discarded, and the promise resolves with the finished rows and `aborted: true`.
+- Measured with `npm run bench` on the UHD 620 (BENCH2, before SH4's `NEAR_SPARE` and `keep`): High-moving about 216 shadow redraws/min, High-sprint 457, Medium-moving 120, High-stress 1555. After SH4 (LAB2), High-moving and Ultra-moving are about 120/min.
+- BO's in-game benchmark runs it behind its `tcbench` screen; `npm run bench` (tools/bench.mjs) runs scenarios in fresh browser contexts instead.
+
+**Shadow refresh** (`finalizeShadow` 1050, `renderShadow` 1453):
+- **When shadows are on:** `enabled && shadows && shadowOk`, the size hasn't failed to allocate, the overworld (`dim 0`), sun y > 0.06 and day > 0.1.
+- **When they're off:** both tiles are invalidated. If `enabled` or `shadows` is off (Quality Low, or K), the atlas is also shrunk back to 1×1, once. At night and in the Nether/End it keeps its size, so it isn't reallocated every dusk.
+- **Two tiles** (cascades, automatic): when `shadowExtent ≥ 64` (High and Ultra; Medium's 56 is a single map, as in 1.4.0), `shadowExtent ≥ 1.5 × (24 + max(shadowMove, 8))`, and the near tile gets at least 512 px, the atlas holds a near tile (radius `24 + max(shadowMove, NEAR_SPARE 8)` = 32 on High and Ultra, `min(shadowSize, 2048)` px) at x = 0 and the far tile (`shadowExtent`, `shadowSize` px) beside it. Otherwise the far tile is the whole atlas. The terrain FS uses the near tile within `24 × 1.25` blocks and the far tile beyond it.
+- **When the first terrain draw is translucent** (`canDraw` false): no refresh starts. The old tiles are kept, or shadows are off for that frame if the far tile isn't valid.
+- **One tile redraw per `shadowEvery` frames at most** (`G.lastRef`); only the first map, the near half of a far redraw and `stress()` skip the wait. Reasons (`ST.why`, counted in `STATS.why` once drawn), checked in this order:
+  1. far `init`: the far tile isn't valid (any frame);
+  2. far `stress`: forced, every n frames, or every `max(60, 15n)` with two tiles;
+  3. once due: a layout change (size, extent, depth, culling, near size or radius) → far `dirty`;
+  4. near tile: `init`, `dirty` (a caster in it changed), `move` (more than its spare margin `max(shadowMove, 8)`; it was `shadowMove` before SH4);
+  5. far tile: `dirty` (a caster in it changed), `move` (more than `max(shadowMove, (extent − near radius) / 2)` with two tiles, e.g. 20 blocks on High, else `shadowMove`), `sun` (about 0.25°, `COS_SUN`), `age` (10 s);
+  6. near `stress`: every n frames.
+- **`stress({moveSpeed})`** adds its emulated drift to both `move` tests (`camDist`), so a bench row like `high-moving` gets the near and far redraws a player flying at that speed would cause, under the same `shadowEvery` limit; they count as `move`, not `stress`.
+- **Shared light basis:** the near tile is always drawn in the far tile's light direction, so the FS needs one matrix product (`uShadowN` maps far to near coordinates). `nearOn` (1121) also requires the near tile's `L` to equal the far tile's exactly.
+  - **Since SH4 a far redraw keeps the light basis** (`keep`) when it is for chunk changes (`dirty`, not a layout change), a move or age, the near tile is valid and the sun has turned less than `COS_SUN`: the far tile is redrawn in its old `L`, so the near tile stays valid and no frame goes without it. After a kept `dirty` or `move` redraw no near redraw follows; after a kept `age` redraw the near tile is redrawn on the next frame in the same basis (`G.nearNext = 5`, 1114), so the 10 s safety net covers it too, and it stays on meanwhile.
+  - Otherwise (`init`, `sun`, a layout change, `stress`) the near tile is invalid after the far redraw and is redrawn on the next frame ("the near half"), so no frame pays for both tiles; the near tile is off (far tile only) for that one frame, by design.
+  - LAB2 at a fixed scale 0.9 with `-moving`: redraws went from 216 to 120/min on High and from 367 to 120/min on Ultra (`NEAR_SPARE` plus `keep`), with high-moving 13.0 / 16.43 → 11.9 / 15.41 ms (median / p95gb).
+- **What marks a tile dirty:** a remesh of a recorded part inside it (`bufferData`, exact since 1.5.0), a new record inside it, `trackColumn` dropping an emptied part, `deleteVertexArray` on a recorded VAO, and a class re-upload. Settings changes don't (`apply()` is a no-op), so dragging a Look slider causes no shadow redraws.
 - **The pass itself** (`renderShadow`):
-  - It queries only `DRAW_FRAMEBUFFER_BINDING`, `VIEWPORT` and 4 `isEnabled` (1156-1159).
-  - It resizes the texture if `SH.size` changed (1162-1170). A failed resize sets `G.allocFailed`, which disables shadows at that size.
-  - It binds the FBO, sets `CULL_FACE` from the snapshot's `cull` (back faces; the hidden `cfg.shadowCull = false` disables it for debugging, 1172), sets `polygonOffset(2, 1)`, clears depth, and draws the opaque records with the depth-only program and then the cutout records (1181).
-  - It restores the program, VAO, FBO, viewport and enables, then `depthFunc(LEQUAL)` and `depthMask(true)` without querying them. That's what gfx.js has set at the first terrain draw (game:gfx.js:1237-1240; `depthMask` from compat).
-  - If it throws, `terrainDraw` catches it: shadows are off for that frame, the map is invalidated, and the next frame starts over (1236-1241).
+  - It reads only 4 `isEnabled` (cull, depth, polygon offset, scissor). The framebuffer and viewport to restore come from the `viewport` hook (`SC.fbo` while the scene FBO is bound, else null; `VP`), so there's no `getParameter` round trip (fixes issue 3; one `getParameter(VIEWPORT)` happens only if no viewport was seen yet).
+  - It resizes the atlas if the layout changed (a failed resize sets `G.allocFailed`, which disables shadows at that size), binds the shadow FBO, enables scissor and depth, `depthFunc(LEQUAL)`, `depthMask(true)`, `polygonOffset(2, 1)`, then `drawTile` for each tile due.
+  - It restores the program, VAO, framebuffer, viewport and capabilities, then `depthFunc(LEQUAL)` and `depthMask(true)` without querying them. That's what gfx.js has set at the first terrain draw (game:gfx.js:1238-1241; `depthMask` from compat).
+  - If it throws, `terrainDraw` catches it: shadows are off for that frame, the tiles are invalidated, and the next frame starts over.
 
-**Terrain FS** (`shadeCode` 314):
-1. **Vanilla path:** returns the vanilla colour when `uFx < 0.5` (325).
-2. **Fog early-out:** when `f > 0.999`, it outputs the fog plus the sun scatter and skips everything else (329-333). The scatter is only applied in open-air fog (`uFogR.y > 20`, 322), not underwater or in lava.
-3. **Normals and classes:** normals from `dFdx/dFdy(vRel)` (334-336), then the leaf, plant, water and emissive classes from `vCls` (337-340).
-4. **Ambient:**
-   - AO is separated from the engine's face shading (347-348).
-   - A hemispheric ambient: day (356), twilight tint (358), night (359); Nether/End variants (362-363).
-   - Sky-light scaling (364).
-5. **Block light:** `tcBl²(0.8+0.2·tcBl)` with a warm tint (367).
-6. **Sun and shadows:**
-   - The sun term (370-376). `tcShadow` is sampled only where the sun reaches.
-   - It's a single cheap tap beyond 32 blocks and on leaves, plants and water (375).
-   - Leaf backscatter (377-380).
-7. **Emissive** (384), then `WATER_CODE` (mode 2 only, 386).
-8. **Grading:** exposure, `tcTone` (a 70% hue-preserving / 30% per-channel highlight roll-off), vibrance-style saturation (saturated colours are boosted less above 1), then contrast (389-395).
-9. **Fog:** fog with the sun scatter (398-401).
+**Terrain FS** (`shadeCode` 406):
+1. **Vanilla path:** returns the vanilla colour when `uFx < 0.5` (417). The derivatives are skipped then too.
+2. **Fog early-out:** when `f > 0.999`, it outputs the fog plus the sun scatter and skips everything else (421). The scatter is only applied in open-air fog (`uFogR.y > 20`), not underwater or in lava.
+3. **Normals and classes:** the normal is `cross(dFdx(vRel), dFdy(vRel))`, normalised; the leaf, plant, water and emissive classes come from `vCls` (unpacked from `vTcP.w` and rounded); leaves and plants bend their shading normal upward.
+4. **Sun and shadows first** (442), while few values are live (LAB: about 1.2 ms cheaper than looking up after the ambient terms). `tcShadow` is sampled only where the sun can reach (`uShadowOn`, `ndl > 0`, `uSunK × sky mask > 0`), and as a single cheap tap beyond 32 blocks and on leaves, plants and water.
+5. **Ambient:** AO is separated from the engine's face shading. The hemispheric ambient is `mix(uAmb0, uAmb1, hemi)`, with both endpoints computed on the CPU (day, twilight, night, Nether/End, ambient strength), then scaled by sky light.
+6. **Block light:** `tcBl²(0.8+0.2·tcBl)` with a warm tint, plus (lit programs only) the engine's own term `tcBlkE` (463): `max(lightmap(vec2(0.0, vLight.y)) − uTcLm0, 0) × 0.35`, using the game's `lightmap()` already in the FS, evaluated only where `vLight.y > 0`. All × `blockLight`. (Since SH4; before, the VS computed a copy of the curve per vertex into `vTcBlk`.)
+7. **Sun light:** `uSunC × ndl × visibility × sky mask`, plus leaf backscatter.
+8. **Emissive**, then `WATER_CODE` (mode 2 only).
+9. **Grading:** exposure, then `tcTone` (a cubic roll-off above 0.7: 70% hue-preserving, 30% per channel). Saturation (vibrance-style above 1) and contrast run only when `uGrade` says one isn't neutral.
+10. **Fog:** fog with the sun scatter.
 
-`tcShadow` (241-271):
-- **Offsets:** a normal offset of `uShadowP.z·1.6 + 0.015`, and a slope bias divided by the depth range `uShadowP.w`. It fades out at the map edge.
-- **Every tap is `textureLod(…, 0.0)`** (238), so ANGLE can skip the taps in untaken branches.
-- **Taps by `uShadowQ`:** 1 tap (Hard), a 4-tap 3×3 tent (Soft, 254-258), or a 9-tap 5×5 tent (Softer, 260-268).
+`tcShadow` (`shadowGlsl` 263-311):
+- **One projection:** both tiles share the far tile's light basis, so `uLVP` gives the far coordinates and the near tile's are `xy × uShadowN.x + uShadowN.yz`, `z + uShadowN.w`.
+- **Tile choice:** within `uShadowB.w` blocks of the camera (30, or 0 = far tile only) it uses the near tile when the point is inside it; otherwise the far tile, faded out at its edge.
+- **Offsets:** a normal offset of `texel × 1.6 + 0.015` (the near or far tile's texel in blocks, `uShadowB.x/y`), and a slope bias divided by the depth range `uShadowB.z`.
+- **Every tap is `textureLod(…, 0.0)`**, which ANGLE turns into `SampleCmp` on D3D11, so the taps in untaken branches can be skipped.
+- **Taps by `uShadowQ`:** 1 tap (Hard, or `cheap`), a 4-tap 3×3 tent (Soft), or a 9-tap 5×5 tent (Softer). The 9-tap tent is unrolled by hand, so D3D doesn't build an indexable temp array.
 
-`WATER_CODE` (278-312):
-- **Waves:** wave octaves faded by the pixel footprint (`tcDx/tcDy`): 2 octaves far away, 4 up close (284-291).
-- **Fresnel:** Schlick (292-293).
-- **Reflection:** the sky shader's own gradient plus the horizon term (294-299).
-- **Body colour:** teal, lit like terrain, keeping 30% of the texture's luminance (300-301).
-- **Absorption:** by view path (302).
-- **Blend:** `A = 1-(1-F)(1-abs)`, `C = (F·R + (1-F)·abs·W)/A` (303-304).
-- **Glints:** a sun glint that respects `tcVis` (the shadow), sharper up close (305-309), and a moon glint (310-311).
+`WATER_CODE` (370-404), unchanged in substance since 1.4.0:
+- **Waves:** wave octaves faded by the pixel footprint (`tcDx/tcDy`): 2 octaves far away, 4 up close.
+- **Fresnel:** Schlick.
+- **Reflection:** the sky shader's own gradient plus the horizon term, darkened where there's no sky light.
+- **Body colour:** teal, lit like terrain, keeping 30% of the texture's luminance.
+- **Absorption:** by view path.
+- **Blend:** `A = 1-(1-F)(1-abs)`, `C = (F·R + (1-F)·abs·W)/A`.
+- **Glints:** a sun glint that respects `tcVis` (the shadow), sharper up close, and a moon glint.
 
-**Sky FS** (`skyCode` 421):
-- a light saturation boost (430) and zenith darkening (431), plus a horizon brightening (432-433);
-- sun glow gated on `dot > 0.4` (437), moon glow on `uSkyDay < 1 && dot < -0.95` (441), each using one `log2` with `exp2`s;
-- IGN dither (445).
+**Sky FS** (`skyCode` 516-547):
+- a light saturation boost, zenith darkening and a horizon brightening;
+- the sun glow `uSkyGlow` × nested lobes, evaluated only inside their cones: ×5 above `dot` 0.4, ×40 above 0.9, ×700 above 0.99. The glow's colour and visibility come from the sun height, on the CPU;
+- a moon glow when `uSkyDay < 0.999 && dot < -0.95`;
+- IGN dither.
 
 **Game hook points:**
-- **WebGL2 prototype methods:** the list above.
-- **GLSL anchors:** the regexes at 162-164, 406-408 and 451-454, plus the source checks at 473-482.
-- **Observed uniforms:** names are tagged by wrapping `getUniformLocation` (696-708): `uOrigin`, `uCam` (only in programs that also have `uSize`, the cloud/water plane VS), `uTop`, `uC`, `uAmbient`, `uSkyLight`. SH also uses the game's `uFogR` (game:gfx.js:293).
-- **Atlas:** caught by `texImage3D(0x8C1A TEXTURE_2D_ARRAY, level 0, 16, 16, n, …, pixels=arg 9)` (game:gfx.js:923-925). Animated layers come from `texSubImage3D` (game:gfx.js:1098-1102) and are ignored once the names are known.
-- **Block names:** from `Array.prototype.indexOf('oak_planks')` on `eng.texNames` (game:main.js:364).
-- **Frame tick:** `clear(mask & COLOR_BUFFER_BIT)` on `mainGL` only (759-762), so the dragon view's own context (game:dragonview.js:54, 176-177) doesn't count.
-- **GL state assumed at the first terrain draw:** `depthFunc(LEQUAL)`, `CULL_FACE` on and `BLEND` off (game:gfx.js:1237-1240), and the atlas on unit 0 with `TEXTURE0` active (game:gfx.js:1256-1257). compat checks both.
+- **WebGL2 prototype methods:** the wrappers above, plus `window.requestAnimationFrame`.
+- **GLSL anchors:** the regexes in `patchTerrainVS` (223), `patchTerrainFS` (`outRe`, `cRe`, `main`; 498) and `patchSky` (549), plus the source checks in `patchSource` (571-583). The lit FS calls the game's own `lightmap()` (game:gfx.js:270-280); only its value at l = 0 is mirrored on the CPU (`tcLm0`), and compat's `LIGHTMAP` anchor covers the whole curve. The patched terrain GLSL must never contain `flat ` (smoke `max: 0`, see `patchTerrainVS`).
+- **Observed uniforms:** names are tagged by wrapping `getUniformLocation`: `uOrigin`, `uCam` (only in programs that also have `uSize`, the cloud/water plane VS), `uTop`, `uC`, `uAmbient`, `uSkyLight` (the dimension, and `tcLm0`). SH also uses the game's `uFogR` (game:gfx.js:294).
+- **Atlas:** caught by `texImage3D(0x8C1A TEXTURE_2D_ARRAY, level 0, 16, 16, n, …, pixels=arg 9)` (game:gfx.js:924-926). Animated layers come from `texSubImage3D` (game:gfx.js:1099-1103) and are ignored once the names are known.
+- **Block names:** from `Array.prototype.indexOf('oak_planks')` on `eng.texNames` (game:main.js:366).
+- **Frame tick:** `clear(mask & COLOR_BUFFER_BIT)` on `mainGL` only, so the dragon view's own context (game:dragonview.js:54, 176-177) doesn't count.
+- **Frame start and size:** the first full-canvas `viewport` of a frame on `mainGL` (game:gfx.js:1186, the only one), with `v.w/v.h` = `glCanvas.width/height` (game:main.js:862-863). The composite runs as a microtask after the rAF callback, which also contains the survival crack, hands and fire overlay (game:main.js:959-964). compat checks all three.
+- **Chunk uploads:** `gfx.setChunk` binds each part's VBO under its VAO and re-specifies it with `bufferData` on every remesh (game:gfx.js:990-1020).
+- **GL state assumed at the first terrain draw:** `depthFunc(LEQUAL)`, `CULL_FACE` on and `BLEND` off (game:gfx.js:1238-1241), and the atlas on unit 0 with `TEXTURE0` active (game:gfx.js:1257-1258). compat checks both.
+- **Context:** no stencil, no `preserveDrawingBuffer`, no game framebuffers, scissor or stencil test anywhere on the main context (compat-checked), which is what lets the scene FBO and the scissored shadow tiles work.
 - **DOM:** `#note` (fallback). **Events:** window `keydown` in the capture phase.
 
-**Globals:** `window.Twitterentary` (above). **Storage:** `tc.shader.<key>`, read at startup and written by `set`, `applyPreset` and `reset`.
+**Globals:** `window.Twitterentary` (above); `window.requestAnimationFrame` is wrapped. **Storage:** `tc.shader.<key>`, read at startup and written by `set`, `applyPreset` and `reset`; `bench()` restores it exactly. `tc.shader.format` (`'1.5'`, new): the 1.4.0 → 1.5 migration marker, written by the migration and with the first non-default value `persist` saves; removed by `reset()`.
 
 **Data flow:**
-1. **Patch:** game `shaderSource(src)` → `patchSource` (472) → `{src, info}` stored in `shaderSrc` (648).
-2. **Compile:** `compileShader` (652). If the patched shader fails, it recompiles the original.
-3. **Attach:** `attachShader` records the shader (663).
-4. **Link:** `linkProgram` (670). If any attached shader is patched and the link succeeds, `progInfo.set(p, {prog, loc:null, mode, lit, terrainVS?, terrainFS?, sky?, cloud?, terrain})`. Otherwise it reverts every shader and relinks.
-5. **Uniform enumeration:** the game enumerates uniforms (game:gfx.js:869-873), and the `getUniformLocation` wrapper tags `locKind`.
-6. **useProgram:** game `useProgram(p)` → wrapper (1108): `initGL` once; `curInfo`; `applyUniforms` (1042): lazy `resolveLocs` first, then `updateState` once per frame, then cached uploads.
-7. **Origin:** game `uniform3f(uOrigin)` updates `lastOrigin`.
-8. **Draw:** game `drawElements` → wrapper (1265) → `terrainDraw` (1222).
-   - On the frame's first terrain draw: the camera fix-up (1231), `finalizeShadow` (1233), `renderShadow` if a refresh is due and this is an opaque or cutout draw (1234-1242), then `pushCam` (1243).
+1. **Patch:** game `shaderSource(src)` → `patchSource` → `{src, info}` stored in `shaderSrc`.
+2. **Compile:** `compileShader`. If the patched shader fails, it recompiles the original.
+3. **Attach:** `attachShader` records the shader.
+4. **Link:** `linkProgram`. If any attached shader is patched and the link succeeds, `progInfo.set(p, {prog, loc:null, mode, lit, terrainVS?, terrainFS?, sky?, cloud?, terrain})`. Otherwise it reverts every shader and relinks.
+5. **Uniform enumeration:** the game enumerates uniforms (game:gfx.js:870-874), and the `getUniformLocation` wrapper tags `locKind`.
+6. **useProgram:** game `useProgram(p)` → wrapper: `initGL` once (which also runs `initPost`); `curInfo`; `applyUniforms`: lazy `resolveLocs` first, then `updateState` once per frame, then cached uploads.
+7. **Frame start:** game `viewport(0,0,w,h)` → `frameStart`: timer, the scene FBO at scale `s`, `frameEnd` queued.
+8. **Origin:** game `uniform3f(uOrigin)` updates `lastOrigin`.
+9. **Draw:** game `drawElements` → wrapper → `terrainDraw`.
+   - On the frame's first terrain draw: the camera fix-up, `finalizeShadow`, `renderShadow` if a tile is due and this is an opaque or cutout draw, then `pushCam`.
    - Then it records `rec[curVAO] = {vao, n, ox/oy/oz, wx/wy/wz, cut, seen, frame, col}` for mode < 2 and calls the original `drawElements`.
-9. **Partial programs:** programs where only the VS matched count as "partial": uniforms are applied, but there's no `terrainDraw`. One example is the stained-glass depth prepass (game:gfx.js:1295-1317), whose FS (game:gfx.js:281-287) is `o = vec4(0.0)`. Its VS still waves, through `uCam`.
+10. **Remesh:** game `bindBuffer` + `bufferData` on a recorded part's VBO → `remeshed`: new count, tiles dirtied.
+11. **Frame end:** the microtask → `composite` (when the FBO was used), timer poll, `govern`, `perfFrame`.
+12. **Partial programs:** programs where only the VS matched count as "partial": uniforms are applied, but there's no `terrainDraw`. One example is the stained-glass depth prepass (game:gfx.js:1296-1318), whose FS (game:gfx.js:282-288) is `o = vec4(0.0)`. Its VS still waves, through `uCam`.
 
 **Texture units:**
+- **Unit 6** = `G.depthTex`, the shadow atlas (`sampler2DShadow uShadowMap`), near tile and far tile side by side. It's 1×1 until the first refresh.
 - **Unit 7** = `G.clsTex` (the class lookup, sampled by the terrain VS and the cutout shadow VS).
-- **Unit 6** = `G.depthTex` (`sampler2DShadow uShadowMap`). It's 1×1 until the first refresh, then sized to `shadowSize`.
-- **Binding:** both are bound in `initGL` (982-995) and never unbound; `resizeShadow` rebinds unit 6 (1123-1124). The game uses units 0-5 only (compat checks gfx.js and entities).
-- **Atlas assumption:** the cutout shadow FS samples the atlas through `uTex = 0` (967), so it assumes the atlas is bound on unit 0 at the first terrain draw. It is: game:gfx.js:1256-1257, compat-checked.
+- **Unit 8** (new in 1.5.0) = `SC.color`, the scene colour texture sampled by the composite. The scene depth texture is bound there only briefly inside `allocScene`, and the colour texture is rebound before it returns.
+- **Binding:** all three are bound once and never unbound; `resizeShadow` rebinds unit 6 and `allocScene` unit 8, both restoring the active unit. The game uses units 0-5 only (compat checks gfx.js, entities and every main-context module, units 6-8). Units 9 and up are reserved for 1.6.
+- **Atlas assumption:** the cutout shadow FS samples the atlas through `uTex = 0`, so it assumes the atlas is bound on unit 0 at the first terrain draw. It is: game:gfx.js:1257-1258, compat-checked.
 
 **Observations (OBS):**
-- **Sky and sun:** `uniform3fv(uTop)` sets `OBS.top`, `topFrame = frameId` and `sunSeen = false` (724). The next `uC` upload (`uniform3f`/`3fv`, kind 4) in the same frame becomes `OBS.sun`, normalized (501-505).
-  - This relies on the sun sprite being the first `uC` after the sky: game:gfx.js:1350→1362 (`drawSky`), and 1401→1417-1428 via `sprite()` (`drawSkyLit`).
-  - `uC` is also set by pChat (game:gfx.js:1595) and by signs (game:signs.js:288).
-- **Dimension:** `uniform1f(uAmbient)` sets `OBS.amb` (732), and `uniform3fv(uSkyLight)` sets `OBS.sl` (726). `dim` (806) is checked only when `OBS.lit`:
+- **Sky and sun:** `uniform3fv(uTop)` sets `OBS.top`, `topFrame = frameId` and `sunSeen = false`. The next `uC` upload (`uniform3f`/`3fv`, kind 4) in the same frame becomes `OBS.sun`, normalized.
+  - This relies on the sun sprite being the first `uC` after the sky: game:gfx.js:1351→1363 (`drawSky`), and 1402→1418-1429 via `sprite()` (`drawSkyLit`).
+  - `uC` is also set by pChat (game:gfx.js:1596) and by signs (game:signs.js:288).
+- **Dimension:** `uniform1f(uAmbient)` sets `OBS.amb`, and `uniform3fv(uSkyLight)` sets `OBS.sl`. `dim` is checked only when `OBS.lit`:
   - 1 when `amb > 0.05` (the Nether, where the game uses 0.1);
   - 2 when `isEnd(sl)` (the End).
   - compat checks both values.
-- **Camera:** from the cloud plane's `uCam` (`setCam`), corrected per frame by `e.ox - lastOrigin` on a VAO drawn in the previous frame (1231).
+- **Camera:** from the cloud plane's `uCam` (`setCam`), corrected per frame by `e.ox - lastOrigin` on a VAO drawn in the previous frame.
 
 **CFG ↔ SCHEMA ↔ uniform ↔ GLSL**
 
-| CFG key (default) | SCHEMA label / range (group) | Path | GLSL use (SH line) |
+| CFG key (default) | SCHEMA label / range (group) | Path | GLSL use |
 |---|---|---|---|
-| enabled (true) | Shaders, bool (top row) | `uFx` (820); gates `ST.shadowOn` (840); K toggle (1361) | VS wave gate 172; FS vanilla return 325; sky 423; cloud 468 (dead) |
-| shadows (true) | Sun shadows, bool (quality) | `ST.shadowOn` (840) → `uShadowOn` (1077) | FS 374 |
-| shadowSize (2048) | Shadow resolution 1024-4096, step 1024 (quality) | `shadowTargetSize` (829) → `SH.size` (871): texture resize (1162), viewport (1171), texel snap (872), `uShadowP.xy` (1089) | tent taps 248-249 |
-| shadowExtent (56) | Shadow range 16-96, step 8 (quality) | `SH.E` (871): `lightMat` (777), `inFootprint` (891), `uShadowP.z` (1086) | normal offset 242 |
-| shadowDepth (256) | none; 64-1024 | `SH.Z` (871): `lightMat` (777), `uShadowP.w` | bias 245 |
-| shadowFilter (1) | Shadow edges: Hard / Soft / Softer, choice (quality) | `uShadowQ` (824) | 1 tap 247; 4-tap tent 254-258; 9-tap tent 260-268 |
-| shadowEvery (8) / shadowMove (6) | Shadow update limit (frames) 1-30 / Shadow update distance 1-16 (quality) | `finalizeShadow` 859 / 861 | — |
+| enabled (true) | Shaders, bool (top row) | `uFx`; gates `ST.shadowOn` and the scene FBO; K toggle | VS class fetch, waving; FS vanilla return and derivatives; sky; cloud (dead) |
+| shadows (true) | Sun shadows, bool (quality) | `ST.shadowOn` → `uShadowOn` | FS shadow gate |
+| shadowSize (2048) | Shadow resolution 1024-4096, step 1024 (quality) | `shadowTargetSize` → far tile size; near tile = `min(size, 2048)`; atlas `(near + far) × far` | `uShadowP` |
+| shadowExtent (56) | Shadow range 16-96, step 8 (quality) | far tile `E` (`lightMat`, `inFootprint`); 64 or more (and ≥ 1.5 × (24 + max(`shadowMove`, 8))) adds the near tile | `uLVP`, `uShadowB.y` |
+| shadowDepth (256) | none; 64-1024 | tiles' `Z` | `uShadowB.z` (bias), `uShadowN.w` |
+| shadowFilter (1) | Shadow edges: Hard / Soft / Softer, choice (quality) | `uShadowQ` | 1, 4 or 9 taps |
+| shadowEvery (8) / shadowMove (6) | Shadow update limit (frames) 1-30 / Shadow update distance 1-16 (quality) | `finalizeShadow`: one tile redraw per `shadowEvery` frames; near radius and near move threshold use `max(shadowMove, 8)`, the far move threshold `shadowMove` | — |
+| shadowCascades (true) | none; hidden, new | `finalizeShadow` (`useNear`): false = far tile only | — |
 | shadowTaps (8) | none; unused since 1.4.0 | — | — |
-| shadowCull (true) | none; debug | `SH.cull` (871) → `renderShadow` 1172 | — |
-| waving (true) | Waving leaves & plants, bool | `uWaveOn` (821) | VS 172 |
-| leafSway (0.028) / plantSway (0.075) | 0-0.15 / 0-0.3 | `uLeafSway` / `uPlantSway` | VS 180 |
-| waterEffects (true) | Water effects, bool | `uWaterOn` (824) | `WATER_CODE` gate 279 (translucent FS only) |
-| waveStrength (1.0) | 0-2 | `uWaveStr` | 289 |
-| skyEffects (true) | Sky effects, bool | `uSkyOn` (824) | sky 423 |
-| cloudEffects (true) | none | `patchCloud` gate (463) | cloud patch (dead) |
-| sunStrength (0.75) | Sun light 0-2 (look) | `uSunStr` | 376, 379 |
-| ambientStrength (1.0) | Ambient light 0-2 (look) | `uAmbStr` | 364 |
-| blockLight (0.9) | Block light 0-2 (look) | `uBlockStr` | 367 |
-| aoPower (1.3) | Contact shadows (AO) 0.5-3 (look) | `uAoPow` | 348 |
-| emissive (1.0) | Emissive glow 0-2 (look) | `uEmissive` | 384 |
-| exposure / saturation / contrast (1.0 / 1.0 / 1.0) | 0.4-2 / 0-1.5 / 0.5-1.8 (look) | `uExposure / uSaturation / uContrast` | 389 / 393-394 / 395 |
+| shadowCull (true) | none; debug | tiles' `cull` → `drawTile` | — |
+| renderScale (0 = Auto) | Render scale: Auto, 100%…50%, choice (quality, Performance) | `scaleSetting` → `frameStart` (fixed), else the governor | composite `uTcScale`/`uTcTexel` |
+| renderScaleMin (0.6) | Auto: lowest scale 0.5-1, step 0.05 (quality, Performance) | `govern`'s floor; `uTcCheap` while Auto sits at it | composite |
+| sharpen (0.5) | Upscale sharpening 0-1, step 0.05 (quality, Performance) | `composite` → `uTcSharp` | composite FS |
+| waving (true) | Waving leaves & plants, bool | `uWaveOn` | VS waving |
+| leafSway (0.028) / plantSway (0.075) | 0-0.15 / 0-0.3 | `uLeafSway` / `uPlantSway` | VS waving |
+| waterEffects (true) | Water effects, bool | `uWaterOn` | `WATER_CODE` gate (translucent FS only) |
+| waveStrength (1.0) | 0-2 | `uWaveStr` | water normals |
+| skyEffects (true) | Sky effects, bool | `uSkyOn` | sky gate |
+| cloudEffects (true) | none | `patchCloud` gate | cloud patch (dead) |
+| sunStrength (0.75) | Sun light 0-2 (look) | `uSunC` (CPU: sun colour × strength × `uSunK`) | FS sun light, leaf backscatter |
+| ambientStrength (1.0) | Ambient light 0-2 (look) | `uAmb0`/`uAmb1` (CPU, `ambientEnds`) | FS ambient |
+| blockLight (0.9) | Block light 0-2 (look) | `uBlockStr` | FS block light |
+| aoPower (1.3) | Contact shadows (AO) 0.5-3 (look) | `uAoPow` | FS AO |
+| emissive (1.0) | Emissive glow 0-2 (look) | `uEmissive` | FS emissive |
+| exposure / saturation / contrast (1.0 / 1.0 / 1.0) | 0.4-2 / 0-1.5 / 0.5-1.8 (look) | `uExposure / uSaturation / uContrast`, plus `uGrade` = saturation or contrast not neutral | FS grading |
 
-**Presets** (86-98). Quality sets `shadows, shadowSize, shadowExtent, shadowFilter, shadowEvery, shadowMove`:
+**Uniforms derived from state rather than CFG:**
+- `uTime` (`ST.time`): VS waving, water waves. `uCam`: VS waving, water.
+- `uSunDir` (= `sunL`, y ≥ 0.14), `uSunCol`, `uSkySun` (the raw sun), `uZenith` (= `OBS.top`), `uDay`, `uSkyDay`, `uDim`.
+- New: `uSunK`, `uSunC`, `uAmb0/uAmb1`, `uGrade`, `uTcLm0` (lit FS; SH4, replacing the VS-only `uTcSkyL`/`uTcAmbL`) and `uSkyGlow` (sky), all from `updateState`.
+- Shadows: `uLVP` (the far tile's light matrix), `uShadowP` = (near tile size, far tile size, 1 / atlas width, 1 / atlas height), `uShadowB` = (near texel, far texel in blocks, depth range, near radius or 0), `uShadowN` = the far → near scale and offset.
+- Samplers: `uShadowMap` = 6, `uClsTex` = 7, the composite's `uTcScene` = 8. `uCloudTint` is dead.
+- The game's own: the lit FS uses `uAmbient` for its ambient floor (game:gfx.js:272) and `lightmap()` for the engine block-light term, and every patched terrain FS uses `uFogR`.
 
-| Quality | shadows | Size | Extent | Filter | Every | Move |
-|---|---|---|---|---|---|---|
-| Low | off | (default) | (default) | (default) | (default) | (default) |
-| **Medium** | on | 2048 | 56 | Soft | 8 | 6 |
-| High | on | 4096 | 72 | Soft | 4 | 4 |
-| Ultra | on | 4096 | 96 | Softer | 2 | 2 |
+**Presets** (96-109). Quality sets `shadows, shadowSize, shadowExtent, shadowFilter, shadowEvery, shadowMove` and, since 1.5.0, `renderScale, renderScaleMin, sharpen` (Auto, 0.6, 0.5 in every Quality preset):
 
-Look sets `sunStrength, ambientStrength, blockLight, aoPower, emissive, exposure, saturation, contrast`:
+| Quality | shadows | Size | Extent | Filter | Every | Move | Render scale |
+|---|---|---|---|---|---|---|---|
+| Low | off | (default) | (default) | (default) | (default) | (default) | Auto, lowest 0.6, sharpen 0.5 |
+| **Medium** | on | 2048 | 56 | Soft | 8 | 6 | Auto, lowest 0.6, sharpen 0.5 |
+| High | on | 2048 (1.4.0: 4096) | 72 | Soft | 4 | 4 | Auto, lowest 0.6, sharpen 0.5 |
+| Ultra | on | 2048 (1.4.0: 4096) | 96 | Softer | 2 | 2 | Auto, lowest 0.6, sharpen 0.5 |
+
+High and Ultra use two tiles: a 2048 far tile next to a 2048 near tile (a 4096×2048 atlas), so near shadows are sharper than 1.4.0's single 4096 map at a lower cost. Their descriptions read "Sharp near shadows, …-block range, …". Medium stays a single 2048 map ("2048 shadows, 56-block range, soft edges.").
+
+**1.4.0 profiles:** a saved 1.4.0 High or Ultra (shadowSize 4096 and nothing else changed in the Quality group) is migrated once at load: its saved `shadowSize` is dropped, so it reads as High/Ultra at 2048 with the near tile (`LEGACY_140`, 148-168). Any other saved combination stays as Custom.
+
+Look sets `sunStrength, ambientStrength, blockLight, aoPower, emissive, exposure, saturation, contrast` (unchanged in 1.5.0):
 
 | Look | Sun | Ambient | Block | AO | Emissive | Exposure | Saturation | Contrast |
 |---|---|---|---|---|---|---|---|---|
@@ -324,105 +428,148 @@ Look sets `sunStrength, ambientStrength, blockLight, aoPower, emissive, exposure
 
 `waving`, the sways, `waterEffects`, `waveStrength` and `skyEffects` belong to neither group.
 
-**Uniforms derived from state rather than CFG:**
-- `uTime` (`ST.time`): VS waving, water waves.
-- `uCam`: VS 173, water 280.
-- `uSunDir` (= `sunL`, y ≥ 0.14): 370, 378.
-- `uSunCol`: 376, 308, 331, 400.
-- `uZenith` (= `OBS.top`): the water reflection, 296.
-- `uSkySun` (the raw sun): 305, 330, 371, 399; sky 427-443.
-- `uDay`: 352, the scatter at 322.
-- `uSkyDay`: sky 426.
-- `uDim`: 362-363, 372.
-- `uLVP`: 242.
-- `uShadowP`: 242-249.
-- Samplers: `uShadowMap` = 6, `uClsTex` = 7. `uCloudTint` is dead.
-- The game's own: the lit FS uses `uAmbient` (319; game:gfx.js:271), and every patched terrain FS uses `uFogR` (322).
-
 **Hot paths:**
+- **`requestAnimationFrame` wrapper:** a `WeakMap.get` per call, then three field writes per callback.
+- **`viewport` wrapper:** two compares per call; the frame start adds `queueMicrotask`, one timer query and, with the FBO, a `bindFramebuffer` and a `viewport`.
 - **`uniform3f/3fv/1f` wrappers:** a `WeakMap.get` on every uniform call in the game (one `uOrigin` per chunk per pass).
-- **`drawElements` wrapper:** runs on every draw call. `terrainDraw` adds per terrain draw a `Map.get`, field writes and `trackColumn`, which does a `Map.get` only when the record's column changed. `inFootprint` runs only for new or changed records.
-- **`useProgram`:** a `WeakMap.get`. For patched programs, a compare of 20 floats and 5 vec3s against the program's cache, plus GL calls for the values that changed. That's about 8-25 uniform calls per frame in total, against about 80 in 1.3.0 (estimated).
+- **`bindBuffer`/`bufferData` wrappers:** a compare per call; a remesh of a recorded part adds a `WeakMap.get` and a `Map.get`.
+- **`drawElements` wrapper:** runs on every draw call. `terrainDraw` adds per terrain draw a `Map.get`, field writes and `trackColumn`, which does a `Map.get` only when the record's column changed.
+- **`useProgram`:** a `WeakMap.get`. For patched programs, a compare of the cached values, plus GL calls for the values that changed.
 - **`clear`, `texSubImage3D`:** a compare each.
+- **Frame end (microtask):** with the FBO, the composite's 4 `isEnabled` (Chrome answers them from its client-side state cache), about 10 GL calls and one full-screen draw; always `getQueryParameter` on up to 32 finished queries, `govern` (a 10-entry loop) and `perfFrame`. Every 250 ms `perfFrame` also reads `getParameter(GPU_DISJOINT_EXT)`.
 - **`Array.prototype.indexOf`:** wrapped only until the names are captured.
-- **`renderShadow`:** only on a refresh, so on change and at most every `shadowEvery` frames. It makes 2 `getParameter` and 4 `isEnabled` calls, iterates `rec` twice (opaque, then cutout), and makes one draw per record in the footprint, with back faces culled.
+- **`renderShadow`:** only on a refresh, at most one tile per frame. It makes 4 `isEnabled` calls, iterates `rec` twice per tile (opaque, then cutout), and makes one draw per record in the tile, with back faces culled.
 - **GPU per terrain fragment:**
-  - Within 32 blocks where the sun reaches: 1, 4 or 9 compare taps (Hard, Soft, Softer).
-  - Beyond that, and on foliage and water: 1 tap.
-  - Fully fogged fragments skip lighting, shadows and water.
-  - Measured in SwiftShader at 640×360 (not a real GPU): Hard costs about the same as Low (no shadows), Soft about +17 ms, Softer about +33 ms.
-- **Sky:** a full-screen pass; its glow terms are gated.
+  - Within 32 blocks where the sun reaches: 1, 4 or 9 compare taps (Hard, Soft, Softer). Beyond that, and on foliage and water: 1 tap.
+  - Fully fogged fragments skip lighting, shadows and water; with effects off (K) the derivatives are skipped too.
+  - The engine's block-light term is one `lightmap()` call in the lit FS, only where `vLight.y > 0`; the day/ambient/sun mixes run once per frame on the CPU.
+- **Varyings:** the patch adds one smooth `vec4` (`vTcP`) and no `flat` varying. A flat varying made ANGLE D3D11 (most likely its provoking-vertex geometry shader) cost about 2.3-3 GPU ms per frame at rd 12 on the UHD 620, a per-primitive cost that grows with the chunk count (LAB2: `off` 7.52 → 5.18 GPU ms against vanilla 4.57).
+- **Composite:** one full-screen pass per scaled frame, 1 to 3 taps (LAB on the UHD 620 at 1080p: about 0.6-0.85 ms).
+- **Shadow redraws:** at most one tile per `shadowEvery` frames, and the far tile's leaves are drawn as solid quads.
+- **Sky:** a full-screen pass; its glow lobes are only evaluated inside their cones.
 
-**Settings:** every key applies on the next frame. Uniforms are rebuilt from `CFG` every frame, and `finalizeShadow` compares the shadow settings (through `cfgNum`) with the snapshot of its last refresh. There are no reload flags left.
-- **`shadows` and `shadowSize`:** turning `shadows` on, or changing `shadowSize`, resizes the depth texture at the next refresh. Turning shaders or shadows off shrinks it to 1×1.
-- **Shadow range and depth:** `shadowExtent` and `shadowDepth` take effect with the next refresh, which a change triggers, and reach the GLSL through `uShadowP`.
-- **K toggle:** live, and saved.
+**Settings:** every key applies on the next frame. Uniforms are rebuilt from `CFG` every frame, and `finalizeShadow` compares the shadow settings (through `cfgNum`) with each tile's last snapshot. There are no reload flags left.
+- **`shadows` and `shadowSize`:** turning `shadows` on, or changing `shadowSize`, resizes the atlas at the next refresh. Turning shaders or shadows off shrinks it to 1×1.
+- **Shadow range and depth:** `shadowExtent` and `shadowDepth` take effect with the next refresh, which a change triggers. `shadowExtent` and `shadowMove` also decide whether the near tile is used.
+- **Render scale:** `renderScale`, `renderScaleMin` and `sharpen` apply on the next frame; a fixed scale stops the governor, and Auto starts again from its current scale (or `renderScaleMin` if it was below it).
+- **K toggle:** live, and saved. With shaders off the frame renders directly (no FBO).
 
-## 3. tweetcraft-better-options.js (BO, 959 lines)
+## 3. tweetcraft-better-options.js (BO, 1428 lines)
 
-**Purpose:** takes over the pause menu's "Options…" button (matched in the player's language) and opens a tabbed menu instead: Graphics, Shaders, registered mod tabs, Keybinds, About. Hosts the settings bus. Adds UI/HUD scale, mouse sensitivity, game-key remapping, FOV (down to 2), render distance, the shaders' Quality and Look pickers, "Reset shaders" and "Reset all options". "Game options…" opens the game's own Options screen (FOV, music, held light, country, chat translation, language). Every setting is a game-style full-width button or slider with its caption drawn on it. **Metadata:** `@version 1.1.0`, `@run-at document-start`, `@grant none`, `@namespace tweetcraft.twitterentary`. The in-code version `VERSION` (20) reads `GM_info.script.version` (`'0.0.0'` without `GM_info`), so there's nothing to keep in sync.
+**Purpose:** takes over the pause menu's "Options…" button (matched in the player's language) and opens a tabbed menu instead: Graphics, Shaders, registered mod tabs, Keybinds, About. Hosts the settings bus. Adds UI/HUD scale, mouse sensitivity, game-key remapping, FOV (down to 2), render distance, the shaders' Quality and Look pickers, "Reset shaders" and "Reset all options". New in 1.2.0: a **performance overlay** (F2, rebindable) that shows `Twitterentary.perf`, and an **in-game benchmark** on the Shaders tab that runs `Twitterentary.bench()` where the player stands (Escape, leaving fullscreen or a window resize stops it). "Game options…" opens the game's own Options screen (FOV, music, held light, country, chat translation, language). Every setting is a game-style full-width button or slider with its caption drawn on it. **Metadata:** `@version 1.2.0`, `@run-at document-start`, `@grant none`, `@namespace tweetcraft.twitterentary`; `@description` now ends "…, plus a performance overlay and an in-game benchmark." The in-code version `VERSION` (20) reads `GM_info.script.version` (`'0.0.0'` without `GM_info`), so there's nothing to keep in sync.
 
 | Name | Line | Purpose |
 |---|---|---|
-| `TAG, MENU_NAME='tcoptions', STORE_KEY, SHADER_PREFIX, RDS, VERSION, DEFAULTS` | 15-28 | constants. Defaults: `ui.scale 1, hud.on true, input.sens 1, keys.map {}, keys.mute []` |
-| `cfg, save, clone` | 30-33 | `tc.options` load and save |
-| `sections, keybinds, subs, bus, emit` | 35-62 | the bus (see §1). `emit` swallows errors |
-| `store, isTyping, $, toast` | 64-83 | localStorage wrapper, helpers, `#note` toast |
-| `domReady, menus, _injectMenus` | 85-102 | lazy, memoized `import('/js/menus.js')` after DOMContentLoaded, started at load (101) |
-| `i18n, makeLabels, LBL, relabel` | 105-136 | lazy `import('/js/i18n.js')` after DOMContentLoaded (a failed import warns and keeps English). `LBL = {options, full, dist}`: the English labels always, plus `t('pause.options')`, `t('pause.full')`, `t('pause.exitFull')` and `t('pause.distance', {n})` for each of `RDS` (`dist` maps label → n). A `t()` that throws or returns the key is ignored |
-| `applyLabelCss, initLabels, bus._labels` | 139-164 | `<style id="tc-options-i18n">`: hides the pause menu's Distance and Fullscreen buttons by their translated labels (`CSS.escape`d); rebuilt on `onLocaleChange` (161). `_labels()` is a test seam |
-| `ourMenuOpen` | 166 | `#screen .inner .tc-marker` exists |
-| `fovCache, getFov, syncFov` | 168-172 | cache of `mc.fov` (30-110 at load, else 70). `syncFov` re-reads `mc.fov` whenever the Graphics tab is built, so a change made on the game's Options screen shows up. It takes 30-110 only, like the game's load check, so a transient zoom value left in `mc.fov` is ignored |
-| `stealFovInput, setFov, bus.fov` | 173-197 | opens the game's Options screen, grabs `input[type=range][data-k="fov"]`, sets `min=5, step=any`, reopens our menu or closes, re-locks the pointer. `setFov` clamps to 2-110, writes `mc.fov` and dispatches `input` |
-| `currentRd, distanceButton, setRenderDistance, bus._setRenderDistance` | 199-228 | `openPause()`, then clicks the button whose `aria-label` is in `LBL.dist` until it shows the target (≤ 12 clicks), writes `mc.rd`, and reopens ours. On the title screen `openPause` returns early (game:menus.js:1882-1884), so only `mc.rd` is written. `_setRenderDistance` is a test seam (no consumer yet) |
-| `toggleFullscreen` | 230-236 | `requestFullscreen`/`exitFullscreen`, toast on refusal |
-| `sendF1(onlyIfHidden), toggleHud` | 237-262 | `closeMenu()`, a synthetic F1 keydown and keyup (both `__tc`), then reopens ours. With `onlyIfHidden` it presses only if `#hudtop.hidden`, the game's real HUD state once `closeMenu` has run `updateTop` (game:main.js:2208-2214), and does nothing when `#hudtop` is missing. `toggleHud` flips `hud.on`, then `sendF1()` |
-| `uiTimer, TOUCH_PARAM, isTouch, defaultRd, uiMult, uiBase` | 264-277 | `isTouch` = `(pointer: coarse)` or the `?touch` URL param, like the game (game:main.js:129). `defaultRd` = 6 on touch, else 8. `uiBase` copies the game's `--u/--d` formula (game:main.js:515-522) |
-| `applyUiScale, reassertUiScale` | 278-294 | set `--u, --d, --tc-s`; the reassert runs on a 250 ms interval |
-| `noteFont, hudScale, patchHudScale` | 296-323 | wraps `Hud.prototype.draw` (`o.gs`), `suggestions` (arg 0), `tab` (arg 1) and `hint` (arg 1), marked `__tcScaled`; captures the bitmap font |
-| `patchSurvivalScale` | 325-342 | wraps `SurvivalClient.prototype.drawHud(hud, font, gs)` |
-| `redrawButtonLabels, rescaleLabels, startLabelObserver` | 344-392 | redraws the canvas labels of `button.mcb` (not `.hb`) at the scaled px; MutationObserver on the `#screen` subtree |
-| test seams | 394-398 | `_injectUi, _patchHud, _patchSurvival, _injectSurvival, _rescaleLabels` |
-| `h, T, row, note, small, header, subhead, sep` | 400-418 | DOM builders. `small` = `p.desc.small`; `subhead` = a `.tc-sub` section heading |
-| `btn(label, fn, {cls})` | 420-425 | `button.mcb` with `aria-label`; the click handler catches errors. `b.__setLabel(text)` relabels it in place |
-| `toggle(label, v, fn)` | 427-431 | full-width `.mcb.tc-full.tc-tg` reading "Label: ON" / "Label: OFF" |
-| `cycle(label, [[v, l]…], value, fn)` | 433-445 | full-width `.mcb.tc-full.tc-cycle` reading "Label: l"; a click steps to the next option and calls `fn(v)`. A value not in the list shows raw, and the first click picks option 0 |
-| `stepDecimals, slider` | 446-470 | `div.tc-slider` = `input.tc-range` + `div.tc-cap`: the caption "Label: value" sits on the 200u × 20u track (the game's `.fov-control` look, game style.css:225-290). Values are shown and passed to `oninput`/`onchange` rounded to the step's decimals |
-| `item(label, control)` | 473-477 | returns a `.tc-full` or `.tc-slider` control alone; anything else gets a two-column `.tc-item` with an ellipsised left caption (keybind rows, Fullscreen) |
-| `ensureCSS` | 480-525 | one `<style>` (see §1) |
-| `ARMED_LABEL, armed, isArmed, relabelArmed, arm, disarm, armButton` | 527-546 | two-click confirmations (3 s). The state is kept outside `build`, so a rebuild keeps it. `armButton(id, label, fn)` tags its button `data-tc-arm`, and `arm`/the timeout relabel it in place ("Click again to reset"), never through `refresh()`, so a slider drag on another row isn't cut off |
-| `fovRow, rdRow, fullscreenRow, scaleRow, hudRow` | 548-566 | Graphics rows. FOV slider 30-110. Render distance slider 4-12, step 2, applied on `change`. Fullscreen is an `item` with an Enter/Exit button. HUD is a toggle |
-| `openGameOptions, graphicsSection` | 567-581 | "Game options…" calls `M.openOptions()`: the game's screen, whose Done (game:menus.js:1876) calls `back()`, which goes to the pause menu, or to the title screen before the world starts (game:menus.js:232-248) |
-| `KEYNAMES, keyName, capturing, setCapturing` | 583-586 | key-capture state. Mirrors `bus.capturing` |
-| `screenIsOn, invClosed, remapActive, modKeySet` | 588-595 | remap gating; `modKeySet` = the codes of registered mod keybinds |
-| `onKeyCapture, onKeyCaptureImpl` + listeners | 596-631 | capture mode swallows the key (a game action can't take a mod's key, 608), `keys.map` remap re-dispatch (`__tc`), `keys.mute` block |
-| `currentKeyFor, bindEntry` | 633-650 | game binds are stored as `map[newKey]=def` with `def` muted; mod binds call `entry.set` |
-| `GAME_ACTIONS, keybindEntries, entryKey` | 652-663 | 13 game actions (WASD, Space, Shift, Ctrl, Q, E, T, F5, F3, F1) plus mod keybinds |
-| `keybindsSection, prettyKey` | 665-691 | Keybinds tab: the mouse sensitivity slider (`input.sens`), a `.tc-list` of `item` rows ("Press a key" while capturing), "Reset all keybinds" |
-| `clearShaderKeys, setShader, shReloadPending, resetShaders` | 694-721 | `clearShaderKeys` removes every `tc.shader.*` key. `setShader` = `TE.set(key, v)`; for an older SH without `set` it writes `cfg[key]` and `tc.shader.<key>` and calls `TE.apply` if present. `resetShaders` = `TE.reset()` + `clearShaderKeys()`. It returns false when only the keys could be cleared (an older SH without `reset`), and then sets `shReloadPending` |
-| `presetPicker` | 722-741 | a `.tc-cycle` button "Quality: Medium" + a `small` description. A click applies the next preset (from Custom, the first) with `TE.applyPreset(group, id)`, then `refresh()`. Returns an `update()` that relabels it in place ("Custom" when `TE.currentPreset` is null) |
-| `shadersSection` | 742-803 | the Shaders tab (below) |
-| `resetting, resetAll, onResetAllClick, aboutSection` | 806-859 | the About tab and "Reset all options" (below) |
-| `curTab, tabsList, buildScreen, api` | 861-901 | screen builder; `reg:` sections get `build(api())`; a tab that throws shows a note instead |
-| `bus.ui, bus.build, bus.close` | 902-904 | exports |
-| `openMenu, closeMenu, refresh` | 906-921 | `M.showScreen('tcoptions', buildScreen, 'dim')` then `stealFovInput()`; `M.back()`; `M.refresh()` while our menu is open |
-| `onDocClick` | 923-933 | capture click on a `#screen .inner button[aria-label]` whose label is in `LBL.options` opens our menu |
-| `sensMult` + mousemove | 935-945 | scales `movementX/Y` under pointer lock on `#gl` |
-| init | 947-958 | `applyUiScale`, CSS, then on DOM ready `tryPatch` (10 tries × 300 ms), the label observer and `initLabels`; `resize` (2×), the interval, `fullscreenchange` |
+| `TAG, MENU_NAME='tcoptions', STORE_KEY, SHADER_PREFIX, RDS, VERSION, DEFAULTS` | 15-29 | constants. Defaults: `ui.scale 1, hud.on true, input.sens 1, keys.map {}, keys.mute [], perf.overlay false` |
+| `cfg, save, clone` | 31-34 | `tc.options` load and save |
+| `sections, keybinds, subs, bus, emit` | 36-63 | the bus (see §1). `emit` swallows errors |
+| `store, isTyping, $, toast` | 65-85 | localStorage wrapper, helpers, `#note` toast. `toast(text, ms)` takes an optional duration (default 2 s) since 1.2.0 |
+| `domReady, menus, _injectMenus` | 87-104 | lazy, memoized `import('/js/menus.js')` after DOMContentLoaded, started at load (103) |
+| `i18n, makeLabels, LBL, relabel` | 107-138 | lazy `import('/js/i18n.js')` after DOMContentLoaded (a failed import warns and keeps English). `LBL = {options, full, dist}`: the English labels always, plus `t('pause.options')`, `t('pause.full')`, `t('pause.exitFull')` and `t('pause.distance', {n})` for each of `RDS` (`dist` maps label → n). A `t()` that throws or returns the key is ignored |
+| `applyLabelCss, initLabels, bus._labels` | 141-166 | `<style id="tc-options-i18n">`: hides the pause menu's Distance and Fullscreen buttons by their translated labels (`CSS.escape`d); rebuilt on `onLocaleChange` (163). `_labels()` is a test seam |
+| `ourMenuOpen` | 168 | `#screen .inner .tc-marker` exists |
+| `fovCache, getFov, syncFov` | 170-174 | cache of `mc.fov` (30-110 at load, else 70). `syncFov` re-reads `mc.fov` whenever the Graphics tab is built, so a change made on the game's Options screen shows up. It takes 30-110 only, like the game's load check, so a transient zoom value left in `mc.fov` is ignored |
+| `stealFovInput, setFov, bus.fov` | 175-199 | opens the game's Options screen, grabs `input[type=range][data-k="fov"]`, sets `min=5, step=any` (187), reopens our menu or closes, re-locks the pointer. `setFov` clamps to 2-110 (194), writes `mc.fov` and dispatches `input` |
+| `currentRd, distanceButton, setRenderDistance, bus._setRenderDistance` | 201-230 | `openPause()`, then clicks the button whose `aria-label` is in `LBL.dist` until it shows the target (≤ 12 clicks), writes `mc.rd`, and reopens ours. On the title screen `openPause` returns early (game:menus.js:1882-1884), so only `mc.rd` is written. `_setRenderDistance` is a test seam |
+| `toggleFullscreen` | 232-238 | `requestFullscreen`/`exitFullscreen`, toast on refusal |
+| `sendF1(onlyIfHidden), toggleHud` | 243-264 | `closeMenu()`, a synthetic F1 keydown and keyup (both `__tc`, 252/255), then reopens ours. With `onlyIfHidden` it presses only if `#hudtop.hidden`, the game's real HUD state once `closeMenu` has run `updateTop` (game:main.js:2261-2267), and does nothing when `#hudtop` is missing. `toggleHud` flips `hud.on`, then `sendF1()` |
+| `uiTimer, TOUCH_PARAM, isTouch, defaultRd, uiMult, uiBase` | 266-279 | `isTouch` = `(pointer: coarse)` or the `?touch` URL param, like the game (game:main.js:130). `defaultRd` = 6 on touch, else 8. `uiBase` copies the game's `--u/--d` formula (game:main.js:516-525) |
+| `applyUiScale, reassertUiScale` | 280-296 | set `--u, --d, --tc-s`; the reassert runs on a 250 ms interval |
+| `noteFont, hudScale, patchHudScale` | 298-325 | wraps `Hud.prototype.draw` (`o.gs`, 307-315), `suggestions` (arg 0), `tab` (arg 1) and `hint` (arg 1) (`wrapScale`, 317-322), marked `__tcScaled`; captures the bitmap font |
+| `patchSurvivalScale` | 327-344 | wraps `SurvivalClient.prototype.drawHud(hud, font, gs)` |
+| `redrawButtonLabels, rescaleLabels, startLabelObserver` | 346-394 | redraws the canvas labels of `button.mcb` (not `.hb`) at the scaled px; MutationObserver on the `#screen` subtree |
+| test seams | 396-400 | `_injectUi, _patchHud, _patchSurvival, _injectSurvival, _rescaleLabels` |
+| `h, T, row, note, small, header, subhead, sep` | 402-420 | DOM builders. `small` = `p.desc.small`; `subhead` = a `.tc-sub` section heading |
+| `btn(label, fn, {cls})` | 422-427 | `button.mcb` with `aria-label`; the click handler catches errors. `b.__setLabel(text)` relabels it in place |
+| `toggle(label, v, fn)` | 429-433 | full-width `.mcb.tc-full.tc-tg` reading "Label: ON" / "Label: OFF" |
+| `cycle(label, [[v, l]…], value, fn)` | 435-447 | full-width `.mcb.tc-full.tc-cycle` reading "Label: l"; a click steps to the next option and calls `fn(v)`. A value not in the list shows raw, and the first click picks option 0 |
+| `stepDecimals, slider` | 448-472 | `div.tc-slider` = `input.tc-range` + `div.tc-cap`: the caption "Label: value" sits on the 200u × 20u track (the game's `.fov-control` look, game style.css:225-290). Values are shown and passed to `oninput`/`onchange` rounded to the step's decimals |
+| `item(label, control)` | 475-479 | returns a `.tc-full` or `.tc-slider` control alone; anything else gets a two-column `.tc-item` with an ellipsised left caption (keybind rows, Fullscreen) |
+| `ensureCSS` | 482-542 | one `<style>` (see §1). New in 1.2.0: the `.tc-bench` results grid (520-525, columns in `em` so they follow `--tc-f`), the bench screen (526-528) and `#tc-perf` (529-534) |
+| `ARMED_LABEL, armed, isArmed, relabelArmed, arm, disarm, armButton` | 544-563 | two-click confirmations (3 s). The state is kept outside `build`, so a rebuild keeps it. `armButton(id, label, fn)` tags its button `data-tc-arm`, and `arm`/the timeout relabel it in place ("Click again to reset"), never through `refresh()`, so a slider drag on another row isn't cut off |
+| `fovRow, rdRow, fullscreenRow, scaleRow, hudRow, perfRow` | 565-586 | Graphics rows. FOV slider 30-110. Render distance slider 4-12, step 2, applied on `change`. Fullscreen is an `item` with an Enter/Exit button. HUD is a toggle. **`perfRow`** (584, new) is the toggle "Performance overlay: ON/OFF" (`perf.overlay`) |
+| `openGameOptions, graphicsSection` | 587-601 | "Game options…" calls `M.openOptions()`: the game's screen, whose Done (game:menus.js:1876) calls `back()`, which goes to the pause menu, or to the title screen before the world starts (game:menus.js:232-248). The Performance overlay row follows the HUD row |
+| `KEYNAMES, keyName, capturing, setCapturing` | 603-606 | key-capture state. Mirrors `bus.capturing` |
+| `screenIsOn, invClosed, remapActive, modKeySet` | 608-615 | remap gating; `modKeySet` = the codes of registered mod keybinds (now including the overlay key) |
+| `onKeyCapture, onKeyCaptureImpl` + listeners | 616-651 | capture mode swallows the key (a game action can't take a mod's key, 628), `keys.map` remap re-dispatch (`__tc`, 643), `keys.mute` block (648). Listeners at 650-651 |
+| `currentKeyFor, bindEntry` | 653-670 | game binds are stored as `map[newKey]=def` with `def` muted; mod binds call `entry.set` |
+| `GAME_ACTIONS, keybindEntries, entryKey` | 672-683 | 13 game actions (WASD, Space, Shift, Ctrl, Q, E, T, F5, F3, F1) plus mod keybinds |
+| `keybindsSection, prettyKey` | 685-711 | Keybinds tab: the mouse sensitivity slider (`input.sens`), a `.tc-list` of `item` rows ("Press a key" while capturing), "Reset all keybinds", which now wraps each mod `reset()` in try/catch + `console.warn` (fixed issue 48) |
+| `bus._keybinds` | 712-716 | test seam: `[{id, label, key}]` of the registered mod keybinds |
+| `PERF_KEY_DEF='F2', PERF_LINES, readPerfKey` | 721-725 | the overlay key: `perf.key` in `tc.options`, absent = `F2` |
+| `ensurePerfEl` | 728-743 | lazily appends `div#tc-perf` to `<body>` with five line divs `[data-l=fps\|cpu\|scale\|bound\|shadow]` |
+| `perfSet(k, text), isNum, fx1, fx0` | 745-753 | writes a line only when its text changed; `null` hides it |
+| `perfAt, placePerf` + `resize` listener | 754-775 | fixed top-right: below `#hudright`'s buttons while `#hudtop` is shown, else in the corner. That keeps it clear of the game's F3 text (top-left). It re-measures (`getBoundingClientRect`, 769) only when one of its cheap reads changed: `#hudtop.hidden`, `#hudright`'s first child or child count (`buildTop()` replaces them), or `documentElement.style` `--hp`/`--tc-s`; a window `resize` (775) and showing the overlay (800) mark it dirty. A `#hudright` not laid out yet (height 0) is looked at again for up to 8 ticks (771) |
+| `perfTick` | 776-793 | reads `Twitterentary.perf` and `cfg`: "NN FPS · NN.N ms", "CPU NN.N ms · GPU NN.N ms\|n/a", "Scale NN% (Auto\|Fixed\|Off)", "CPU-bound" (yellow, only when `perf.cpuBound`), "Shadows NN/min\|off". Without `perf`: "No performance data (needs Shaders 1.5)" |
+| `applyPerfOverlay` | 794-808 | on: show, plus `setInterval(perfTick, 250)`; off: `clearInterval` and hide. No timer while hidden; ticks are skipped while `document.hidden` |
+| `bus.changed` subscriber, overlay keybind | 809-818 | `perf.overlay` → `applyPerfOverlay`; `perf.key` → re-read. `registerKeybind({id: 'tc.perfOverlay', label: 'Performance overlay'})` (813): `set` writes `perf.key`, `reset` restores F2 |
+| `chatOpen, editorOpen, onPerfKey` + listener | 819-833 | `chatOpen` (819) = `#chatbox` exists and isn't `hidden`; `editorOpen` (820) = any of `.se, .sp, #sign-editor, #book-screen` exists. `onPerfKey` is a window keydown **capture** listener (833, registered after `onKeyCapture`). It ignores repeats, Ctrl/Alt/Meta, `__tc`, `__tcCaptured`, `bus.capturing`, IME composition, a typing target or focused field, `#inv` shown, chat open and an open editor. It works in menus (a harmless view toggle), calls only `preventDefault`, flips `perf.overlay`, and refreshes our menu when the Graphics tab is open. The benchmark also uses `chatOpen` (refuses to start, 1097) and both (never reopens our menu over them, 1150) |
+| `clearShaderKeys, setShader, shReloadPending, resetShaders` | 836-863 | `clearShaderKeys` removes every `tc.shader.*` key. `setShader` = `TE.set(key, v)`; for an older SH without `set` it writes `cfg[key]` and `tc.shader.<key>` and calls `TE.apply` if present (848-850). `resetShaders` = `TE.reset()` + `clearShaderKeys()`. It returns false when only the keys could be cleared (an older SH without `reset`), and then sets `shReloadPending` |
+| `presetPicker` | 864-883 | a `.tc-cycle` button "Quality: Medium" + a `small` description. A click applies the next preset (from Custom, the first) with `TE.applyPreset(group, id)`, then `refresh()`. Returns an `update()` that relabels it in place ("Custom" when `TE.currentPreset` is null) |
+| `BENCH_DEF, numOrNull, cap1, isTextField, benchDefaults, benchSeconds` | 886-908 | `BENCH_DEF = {seconds: 6, warmup: 2, scenarios: [current, off, low, medium, high, ultra]}`, used when `TE.bench.defaults` is missing. `isTextField`: a range/checkbox/button input is not a text field. `benchSeconds` = `TE.bench.estimate(opts)`, else scenarios × (seconds + warmup + 1) |
+| `benchPartial, packBench, BENCH_PARTIAL_NOTE, lastBench, benchNum, benchPct, benchEnv, benchText` | 911-969 | `packBench(res, partial)` makes the JSON-safe `bench.last` (below); `benchPartial` accepts only `'stopped'` or `'interrupted'`. `benchText` builds the clipboard Markdown: `\| Scenario \| FPS \| Mean ms \| p95 ms \| 1% low \| CPU ms \| GPU ms \| Scale \|`, then for a partial result its `BENCH_PARTIAL_NOTE` in italics (968), plus an env line "GPU … · W×H · Shaders … · Better Options … · GPU timer yes\|no · date" |
+| `copyFallback, copyBench` | 970-990 | `navigator.clipboard.writeText`, then a hidden-textarea `execCommand('copy')` fallback, else it logs the text; toast either way |
+| `BENCH_SCREEN='tcbench', BENCH_ABORT_WAIT, benchRun, canAbort, benchScreenUp, benchStatus, setBenchStatus, buildBenchScreen, startBenchStatus, stopBenchStatus` | 991-1029 | the see-through screen shown during a run: a hidden `span.tc-bench-screen` marker plus a `div.tc-cap.tc-bench-status` line at the top with a 1 s countdown: "Benchmark running, about N s left. Don't move.", then "Benchmark finishing. Don't move.", each followed by " Escape stops it." when `canAbort()` (`Twitterentary.bench.abort` exists, 1001), and "Stopping the benchmark." once stopped (1004). `benchRun` (1000) is the run in progress: `{started, watch, stop, abortAns, giveUp, giveUpTimer, fs}` (`fs`: it started in fullscreen). `benchScreenUp` = `#screen.on` with the `.tc-bench-screen` marker. The countdown also backs up the observer: each tick stops a watched run whose screen is gone (1024) |
+| `onBenchScreenChange, watchBenchScreen, unwatchBenchScreen` | 1030-1051 | once the bench screen is up, a MutationObserver on `#screen`'s `class` and `#screen .inner`'s child list (1044-1045) calls `stopBench('closed')` as soon as the game takes the screen away (its pause menu, a death or message screen). Not watched when `showScreen` failed and the menu was closed instead |
+| `stopBench(why)` | 1052-1065 | once per run: sets `run.stop`, stops watching, and (if `bench()` was called) calls `Twitterentary.bench.abort()`. `abortAns` records `'ok'`, `'idle'` (returned false), `'none'` (no `abort`) or `'threw'`. After `'ok'`, a 5 s give-up timer (`BENCH_ABORT_WAIT`, 995) stops waiting for `bench()` |
+| `onBenchKey` + listener | 1066-1079 | window keydown **capture** listener (1079, registered after `onPerfKey`). Only during a run, only Escape, and not while capturing a key or typing. On the bench screen it calls `preventDefault`, `stopImmediatePropagation`, marks `__tcCaptured` and calls `stopBench('escape')`. Without `bench.abort` (once `bench()` has started) Escape goes to the game as before |
+| `onBenchResize` + listeners | 1080-1087 | window `fullscreenchange` and `resize` listeners (bubble phase, 1086-1087). During a run not yet stopped, it calls `stopBench(run.fs ? 'escape' : 'resized')`: in fullscreen, Chrome spends the first Escape on leaving fullscreen and never passes that keydown to the page, and any resize changes the pixel count mid-measurement. Unlike `onBenchKey` it needs neither the bench screen nor `bench.abort` (without it the run keeps measuring and is marked interrupted) |
+| `benchBusy, runBench` | 1088-1167 | the benchmark flow (below) |
+| `bus._runBench, bus._benchText` | 1168-1169 | test seams. `_runBench(opts)` never rejects; it resolves `{ok: true, result}`, `{ok: true, result, interrupted: true}`, `{ok: false, error}`, or for a stopped run `{ok: false, error: 'stopped', stopped: true, reason, saved, result}` (1164), `reason` being `'escape'`, `'resized'`, `'closed'` or `'bench'`. `_benchText(b?)` returns the Markdown for `b` or `bench.last` |
+| `benchLine, benchRows` | 1170-1199 | the Shaders-tab block, only when `typeof TE.bench === 'function'`: `.tc-sub` "Benchmark", a blurb (scenarios from `bench.defaults`, duration from `bench.estimate()`), "Run benchmark" (disabled "Benchmark running" during a run), then, when `bench.last` has rows, "Last benchmark" (with " (stopped)" or " (interrupted)" for a partial result, 1187, and its note as `p.desc.small.tc-bench-partial`, 1188): a `div.tc-bench` table (scenario with its first letter capitalised and the raw name as `title`, FPS, p95 ms, scale %; non-finite values show "n/a"), a `p.desc.small.tc-bench-env` line and "Copy results" |
+| `shadersSection` | 1201-1272 | the Shaders tab (below) |
+| `resetting, resetAll, onResetAllClick, aboutSection` | 1275-1328 | the About tab ("Better Options v…", 1322) and "Reset all options" (below) |
+| `curTab, tabsList, buildScreen, api` | 1330-1370 | screen builder (the `.tc-marker` at 1348); `reg:` sections get `build(api())` (1358); a tab that throws shows a note instead |
+| `bus.ui, bus.build, bus.close` | 1371-1373 | exports |
+| `openMenu, closeMenu, refresh` | 1375-1390 | `M.showScreen('tcoptions', buildScreen, 'dim')` then `stealFovInput()` (1380); `M.back()`; `M.refresh()` while our menu is open |
+| `onDocClick` | 1392-1402 | capture click on a `#screen .inner button[aria-label]` whose label is in `LBL.options` opens our menu |
+| `sensMult` + mousemove | 1404-1414 | scales `movementX/Y` under pointer lock on `#gl` |
+| init | 1416-1425 | `applyUiScale`, CSS, then on DOM ready `tryPatch` (10 tries × 300 ms), the label observer, `initLabels` and `applyPerfOverlay` (1422); `resize` (2×), the interval (1424), `fullscreenchange` |
 
-**Shaders tab** (`shadersSection` 742). Everything on `window.Twitterentary` is feature-detected, so an older SH still gets the per-row UI.
-1. The header, a note while `shReloadPending` (748), then the Quality and Look pickers (750-757), shown only when `TE.presets`, `applyPreset` and `currentPreset` exist.
-2. "Shaders: ON" (766), then the SCHEMA rows grouped under `.tc-sub` headings by `f.section`, in schema order (769-790): `bool` → toggle, `num` → slider, `choice` → cycle.
-3. Each write goes through `setShader` and relabels both pickers in place (`syncPickers`, 757), so dragging a slider never rebuilds the screen.
-4. Rows flagged `reload` (only an older SH has them) get "(reload)", a toast for any type, and a "Reload page" button (801). That button also shows while `shReloadPending`.
-5. "Reset shaders" (795) needs a second click within 3 s (`armButton`).
+**`tc.options` keys added in 1.2.0:**
+- `perf.overlay` (bool, default false).
+- `perf.key` (the overlay's key code; absent = `F2`).
+- `bench.last` = `{at (ms epoch), bo (BO version), env: {gpu, w, h, dpr, version, timer}, rows: [{name, fps, ms, p95, low1, cpuMs, gpuMs, scale, note?}], partial?}`. Numbers are kept as numbers or `null`, with at most 32 rows. `partial` is `'stopped'` (stopped early: only the scenarios that finished) or `'interrupted'` (it ran to the end, but its screen was closed during the run); absent for a complete run.
 
-**Reset all options** (`onResetAllClick` 835 → `resetAll` 807). It asks first in the game's `showMessage(title, text, [[label, fn]…])` (game:menus.js:184). Both buttons first reopen our screen. Without `showMessage` it falls back to the two-click confirm (848). Then, in order:
+**Performance overlay** (`#tc-perf`, 718-833):
+- Look: the game's F3 style. An `rgba(80,80,80,.56)` box, `#e0e0e0` text in the Tweetcraft font at 8 × `--d` with a `--d #3f3f3f` shadow, so it follows BO's UI scale.
+- Placement: fixed top-right, z-index 8 (under `#adv` z9 and `#note` z10), `pointer-events: none`. Below `#hudright` while `#hudtop` is shown, else in the corner (`placePerf` 758).
+- **Why F2:** the game's `PREVENT` set lists only F1/F3/F5 among the F-keys, `onKeyDown` branches only on those, and no game module handles F2 (COMPAT anchors that across the game's key-handling modules). Browsers give F2 no default action (unlike F4, F6, F7, F10-F12), and our other scripts use K (shaders) and C (zoom). Minecraft uses F2 for screenshots, so a future game F2 binding is plausible; the compat anchor would catch it.
+- The key is ignored while chat is open (`#chatbox` not `hidden`), the inventory or a survival screen is shown, or one of the game's editors is open (skin editor `.se`, skin preview `.sp`, `#sign-editor`, `#book-screen`; present means open). compat anchors each editor's element and checks the page has none of them permanently.
+- Not checkable in smoke: the in-world placement under `#hudright`, because the title screen hides `#hudtop`. Check it in game.
+
+**Benchmark** (`runBench` 1092):
+1. It refuses, with a toast, when there's no `bench()`, a bench is running, chat is open or a text field is focused (1095-1097), or `menus.js` lacks `closeMenu`/`showScreen`. It sets `benchBusy` before awaiting `menus()` (1098), so a second call in the same tick is refused, and clears it again on that last refusal (1101). It stops key capture (1107).
+2. It shows the see-through screen: `menus.showScreen('tcbench', buildBenchScreen, '')`, falling back to `closeMenu()` if that throws (1109-1112), and starts watching it (1113). Then a 4 s toast "Benchmark running, about N s. Don't move." and a 150 ms settle.
+3. `await Twitterentary.bench()` (raced against the give-up timer, 1119), then it stores `packBench(result, partial)` in `bench.last` (1141-1144): a complete run, an interrupted one, or a stopped one with at least one finished row. A stopped run with no finished rows leaves `bench.last` unchanged (`saved: false`).
+4. Unless the game took the screen (`reason 'closed'`), it reopens BO on the Shaders tab, scrolled to `.tc-bench` (or the Run button), with a 3 s "Benchmark done", "Benchmark stopped", "Benchmark interrupted" or "Benchmark failed: <msg>" toast. If the screen was taken, or chat, a container, an editor or a text field is open by then, it closes the bench screen only if it's still up and toasts "… See Options, Shaders tab" when a result was saved (1150-1152).
+- **Stopping a run early** (needs SH's `bench.abort()`):
+  - **Escape** on the bench screen (`onBenchKey`): `reason 'escape'`. The game never sees the key, whose `back()` would open the pause menu and leave the run measuring. Our menu comes back on the Shaders tab; with a finished row, `bench.last.partial === 'stopped'` and the `.tc-bench-partial` note shows.
+  - **Leaving fullscreen or a window resize** (`onBenchResize`): `reason 'escape'` if the run started in fullscreen (that is how Escape shows up there: Chrome exits fullscreen and the page never gets the keydown), else `reason 'resized'`. Either way our menu comes back on Shaders, as for Escape.
+  - **The game takes the screen** (observer or the 1 s backstop): `reason 'closed'`, and the game's screen is left alone.
+  - **Someone else calls `Twitterentary.bench.abort()`**: the result has `aborted: true`, `reason 'bench'`, and our menu comes back on Shaders.
+  - Escape, leaving fullscreen or a resize before `bench()` is called (the 150 ms settle) stops it even without `abort`; nothing is saved.
+  - Without `abort`, Escape goes to the game (its pause menu) and the run keeps measuring. The observer still notices: the result is kept as `partial: 'interrupted'` and resolves `{ok: true, result, interrupted: true}`, and our menu isn't reopened.
+- **Why a screen rather than `closeMenu()`:**
+  - With `S.menu` set, the game's slow-frame watchdog (game:main.js:574, `steady` requires `!S.menu`) never calls `regainCanvases()` mid-run (game-core.md §4).
+  - The world, HUD and hand still draw exactly as in play: `show` has no `S.menu` term, and only the crosshair and hint hide.
+  - The player can't move or look (`showScreen` → `releaseInput`).
+
+**Shaders tab** (`shadersSection` 1201). Everything on `window.Twitterentary` is feature-detected, so an older SH still gets the per-row UI.
+1. **While a benchmark runs** (`benchBusy || TE.bench.running`, 1209), it shows only a note and the Benchmark block. There are no preset or SCHEMA rows, so BO never writes `CFG` mid-run.
+2. The header, a note while `shReloadPending`, then the Quality and Look pickers, shown only when `TE.presets`, `applyPreset` and `currentPreset` exist.
+3. "Shaders: ON", then the SCHEMA rows grouped under `.tc-sub` headings by `f.section`, in schema order: `bool` → toggle, `num` → slider, `choice` → cycle. The 1.5.0 Performance rows (`renderScale` cycle, `renderScaleMin` and `sharpen` sliders) come from the schema with no special code.
+4. The Benchmark block follows the Performance section's rows (1257), or, without that section, comes just before the reset separator (1260).
+5. Each write goes through `setShader` and relabels both pickers in place (`syncPickers`), so dragging a slider never rebuilds the screen.
+6. Rows flagged `reload` (only an older SH has them) get "(reload)", a toast for any type, and a "Reload page" button. That button also shows while `shReloadPending`.
+7. "Reset shaders" needs a second click within 3 s (`armButton`).
+
+**Reset all options** (`onResetAllClick` 1304 → `resetAll` 1276). It asks first in the game's `showMessage(title, text, [[label, fn]…])` (game:menus.js:184). Both buttons first reopen our screen. Without `showMessage` it falls back to the two-click confirm. Then, in order:
 1. stop key capture and disarm both confirms;
-2. `await` each mod keybind's `reset()`. This runs before `bus.reset()`, because Zoom's reset writes `zoom.key` into `tc.options`;
+2. `await` each mod keybind's `reset()` (the overlay key included). This runs before `bus.reset()`, because Zoom's reset writes `zoom.key` into `tc.options`;
 3. `resetShaders(TE)`, or only `clearShaderKeys()` when SH isn't loaded;
-4. `bus.reset()`, then `applyUiScale()`;
-5. `sendF1(true)` (824): presses F1 only if the game's HUD is hidden, whether BO or a real F1 hid it;
+4. `bus.reset()` (which also turns the overlay off, drops `perf.key` and `bench.last`, and the `changed` subscriber hides `#tc-perf`), then `applyUiScale()`;
+5. `sendF1(true)` (1293): presses F1 only if the game's HUD is hidden, whether BO or a real F1 hid it;
 6. `await setFov(70)`, then `await setRenderDistance(defaultRd())` (8, or 6 on touch);
 7. `refresh()` and a toast ("Reload to apply the shader defaults" for an older SH).
 
@@ -431,21 +578,24 @@ It never touches any other `mc.*` key.
 **Game hooks:**
 - **Modules:** `import('/js/menus.js')` for `openOptions, closeMenu, openPause, showScreen, showMessage, back, refresh`; `import('/js/i18n.js')` for `t, onLocaleChange` (game:i18n.js:104, 151); `import('/js/ui.js')` for `Hud.prototype.{draw,suggestions,tab,hint}`; `import('/js/survival/client.js')` for `SurvivalClient.prototype.drawHud`.
 - **Labels:** the i18n keys `pause.options`, `pause.full`, `pause.exitFull` and `pause.distance` (`{n}`); English in game:lang/en.js:59-61, 175.
-- **Selectors:** `#screen(.on) .inner`, `input[type="range"][data-k="fov"]`, `button[aria-label]` matched against `LBL`, `button.mcb` (skips `.hb`), `#inv.off`, `#gl`, `#note`, `#cross`, `#hudtop`.
-- **Other:** the CSS variables `--u` and `--d`; a synthetic `F1` key toggles the game HUD.
+- **Selectors:** `#screen(.on) .inner`, `input[type="range"][data-k="fov"]`, `button[aria-label]` matched against `LBL`, `button.mcb` (skips `.hb`), `#inv.off`, `#gl`, `#note`, `#cross`, `#hudtop`, `#hudright` (overlay placement), `#chatbox` (`hidden` = chat closed) and the editor overlays `.se, .sp, #sign-editor, #book-screen` (overlay key and benchmark guards).
+- **Other:** the CSS variables `--u` and `--d`, and `--hp` on `<html>` (read as the overlay's re-measure signal); a synthetic `F1` key toggles the game HUD; the `tcbench` screen relies on the game's slow-frame watchdog skipping frames with a menu open; the bench-screen observer relies on `menus.js` keeping one `#screen` and `#screen .inner` for good (`showScreen` replaces the children and sets the class, `closeMenu` clears both); Escape on the bench screen relies on the game handling Escape in a bubble-phase window keydown listener (all compat-checked). Not a game hook: in fullscreen, Chrome uses the first Escape to leave fullscreen without a keydown, which `onBenchResize` catches through `fullscreenchange`.
+- **Shaders API (1.5.0):** `Twitterentary.perf` (overlay), `bench()`, `bench.running`, `bench.defaults`, `bench.estimate()`, `bench.abort()` (benchmark), all feature-detected.
 
-**Globals:** `window.__tcOptions`. **Storage:** `tc.options`, `tc.shader.*` (fallback writes and clearing), `mc.fov`, `mc.rd`.
+**Globals:** `window.__tcOptions`, `div#tc-perf`. **Storage:** `tc.options` (now also `perf.overlay`, `perf.key`, `bench.last`), `tc.shader.*` (fallback writes and clearing), `mc.fov`, `mc.rd`.
 
 **Hot paths:**
 - `mousemove`, every event: `bus.get`; when sens ≠ 1, also `getElementById` and 2× `defineProperty`.
-- `keydown`/`keyup`: allocates `modKeySet()`, and while `keys.map` is unset, `bus.get` JSON-clones the default.
+- `keydown`/`keyup`: allocates `modKeySet()`, and while `keys.map` is unset, `bus.get` JSON-clones the default. New: `onPerfKey` does one string compare per keydown unless it's the overlay key, and `onBenchKey` returns at once when no benchmark is running; so does `onBenchResize` on `resize`/`fullscreenchange`.
 - The `Hud.draw` wrapper, every HUD frame: `Object.assign` when scale ≠ 1. `suggestions/tab/hint` take rest args on every call.
 - The 250 ms interval: `bus.get` each tick; when `ui.scale` ≠ 1, also `uiBase()` → `matchMedia`.
+- The overlay timer, 4×/s **only while it's shown**: two `getElementById`s and two inline-style reads in `placePerf` (a `getBoundingClientRect` of `#hudright` only when one of them changed) plus string building per tick, with DOM writes only when a line changes.
+- During a benchmark only: the 1 s status tick and the bench-screen MutationObserver (fires on screen changes, not per frame).
 - The MutationObserver redraws labels on every screen rebuild.
 - The capture `click` listener runs one `closest()` per click.
 - A Shaders-tab slider calls `TE.set` and 2× `currentPreset` per `input` event, while dragging only.
 
-**Settings:** all live. `ui.scale` is read by every wrapped call, `input.sens` per event, keys per event. FOV applies through the game's slider handler, render distance through the game's Distance button, and shader rows through `TE.set`. `hud.on` is only shown as a label and is never re-applied at load (issue 17); "Reset all options" checks `#hudtop` instead.
+**Settings:** all live. `ui.scale` is read by every wrapped call, `input.sens` per event, keys per event, `perf.overlay`/`perf.key` through `bus.changed`. FOV applies through the game's slider handler, render distance through the game's Distance button, and shader rows through `TE.set`. `hud.on` is only shown as a label and is never re-applied at load (issue 17); "Reset all options" checks `#hudtop` instead.
 
 ## 4. tweetcraft-zoom.user.js (ZM, 162 lines)
 
@@ -472,51 +622,55 @@ It never touches any other `mc.*` key.
 | Name | Line | Purpose |
 |---|---|---|
 | `MAX, hist, cursor, draft, tracking` | 15-20 | state |
-| `box, chatOpen` | 22-27 | `#chatbox`, visible when `!hidden` (game:main.js:2951/2965) |
+| `box, chatOpen` | 22-27 | `#chatbox`, visible when `!hidden` (game:main.js:3026/3040) |
 | `reset, record, setValue` | 29-49 | `record` trims, de-duplicates consecutive lines, caps at 100 |
 | `up, down` | 51-64 | saves the draft on the first Up; Down past the end restores it |
 | `focusin` capture | 66 | `reset` when `#chatbox` gains focus |
-| `keydown` capture | 70 | returns first on IME composition (`e.isComposing \|\| e.keyCode === 229`, 71), the same test as the game's chat `composing(e)` (game:main.js:2334, 2465). Enter → `record(value)` (before the game clears it). Up/Down without modifiers → `queueMicrotask`, then a `defaultPrevented` check |
+| `keydown` capture | 70 | returns first on IME composition (`e.isComposing \|\| e.keyCode === 229`, 71), the same test as the game's chat `composing(e)` (game:main.js:2387, 2518). Enter → `record(value)` (before the game clears it). Up/Down without modifiers → `queueMicrotask`, then a `defaultPrevented` check |
 | `window.__mcChatHistory` | 92 | `{list (getter copy), clear(), record}` |
 
 **Hooks:** `#chatbox`, window `focusin`/`keydown` capture. **Hot path:** keydown, cheap. **Settings:** none.
 
 ## 6. Issues & smells
 
-Numbers are stable: fixed entries are removed, not renumbered. Fixed in SH 1.4.0 / BO 1.1.0: 2, 4, 5, 7, 8 (frame counting; the rest is now 49), 9, 12, 13, 14, 15, 16, 27, 29, 30, 47, 52.
+Numbers are stable: fixed entries are removed, not renumbered. Fixed in SH 1.4.0 / BO 1.1.0: 2, 4, 5, 7, 8 (frame counting; the rest is now 49), 9, 12, 13, 14, 15, 16, 27, 29, 30, 47, 52. Fixed in SH 1.5.0 / BO 1.2.0: 3 (no `getParameter` in the shadow pass), 48 (per-keybind reset), 51 (exact remesh tracking), 57 (`uAmbStr`/`uSunStr` dropped from `U1` and `fsDecls`), 58 (SH4: the lit FS calls the game's own `lightmap()` instead of a VS copy of the curve; only its value at l = 0 is still mirrored on the CPU, in `tcLm0` 999-1006, which compat's `LIGHTMAP` anchor covers), 60 (SH5: Auto no longer hunts under a real 60 Hz cap: the settle skip, 16 samples for a drop after a raise, the timed backoff, no 0.95 step, and capped drops that need two real misses and go at most 0.1 down; 36-45 → about 3 scale changes/min at 60 Hz vsync).
 
 | # | Where | Why it matters | Suggested fix |
 |---|---|---|---|
-| 1 | SH `patchCloud` 464, 466 | regex literals use `\\s`/`\\(`, so they never match (known in compat). The inserted text `'\\nuniform…'` is a literal backslash-n, so fixing only the regex would produce a GLSL compile error | single escapes in both regexes and `'\n'` in the string; then remove `known` in compat |
-| 3 | SH `renderShadow` 1156-1159 | still 2 `getParameter` (`DRAW_FRAMEBUFFER_BINDING`, `VIEWPORT`) + 4 `isEnabled` per refresh; sync queries can stall on some drivers. Minor now that refreshes are change-driven | track that state in the wrappers, only if profiling shows a stall |
-| 6 | SH K listener 1356-1364 | partly fixed in 1.4.0: it has the capture guards and is saved (`set('enabled')`). But it isn't registered through `registerKeybind`, so it can't be rebound, isn't in the Keybinds tab, and isn't in BO's `modKeySet`. A game action rebound to K, or a remap from K, also toggles the shaders when SH's listener runs first | `registerKeybind({id:'shaders', …})` once the bus exists, storing the key in `tc.shader.key` or the bus |
-| 10 | SH `getUniformLocation` 696-708, `onSprite` 501-505, `updateState` 809 | the sun is "the first `uC` after `uTop`" (sprite, pChat and signs all use `uC`) and day = the zenith's blue channel; both depend on game draw order and palette. compat checks the draw order, not the palette | tag only the sprite program's `uC`; derive day from the sun height |
-| 11 | SH `drawShadowSet` 1144, `shadowProg` 967 | assumes one `TRIANGLES/UNSIGNED_INT/offset 0` draw per VAO (true today, game:gfx.js:1339) and the atlas on unit 0 at the first terrain draw (game:gfx.js:1256-1257). Both are compat-checked | store `mode/type/offset` in `rec`; bind the atlas explicitly |
-| 17 | BO `toggleHud` 259-262, `hudRow` 564-566 | `hud.on` is saved but never applied at load and not updated by a real F1, so the label desyncs. "Reset all options" is safe: it calls `sendF1(true)` (824), which reads `#hudtop` and also restores a HUD hidden by a real F1 | label from `#hudtop.hidden` (outside menus), or apply `hud.on` at startup |
-| 18 | BO init 955 (`uiTimer`), `reassertUiScale` 286-294 | `setInterval(reassertUiScale, 250)` runs forever. At scale 1 it returns after a `bus.get` (288), but at any other scale it recomputes `uiBase()` (`matchMedia`) and reads three CSS properties 4× a second | MutationObserver on `<html style>`, or reassert on resize only |
-| 19 | BO `uiBase` 269-277, `applyUiScale` 278-285 | copies the game formula (game:main.js:515-522) and re-runs `matchMedia('(pointer: coarse)')` on each call. It also overwrites `--u/--d` even at scale 1, and `hp` is unused | multiply the game's current value; do nothing when `m === 1` |
-| 20 | BO 61, 322, 341, 597 | `catch (e) {}` in `emit`, `patchHudScale`, `patchSurvivalScale`, `onKeyCapture` hides failures | `console.warn(TAG, …)` once |
-| 21 | BO `Hud.draw` wrapper 310, `wrapScale` 317 | `Object.assign` every HUD frame when scale ≠ 1. The `suggestions/tab/hint` wrappers allocate a rest-args array on every call, even at scale 1 | mutate and restore `o.gs`; use fixed-arity wrappers |
-| 22 | BO `redrawButtonLabels` 344, observer 384 | re-renders every `button.mcb` label on each screen rebuild even at scale 1 | return early when `m === 1` and `__tcPx` is unset |
-| 23 | BO `stealFovInput` 174-190 | no in-flight guard: `fovInput` is only set after `await menus()` (176, 181), so two first calls in the same task each open and close the game's Options screen. That's a narrow window today: every body after the await is synchronous, and callers (`openMenu` 911, the FOV slider, `resetAll` 825, Zoom) run in separate events. It also caches a detached `<input>` for good and relies on its `oninput` closure (game:menus.js:1805-1809), even after "Game options…" rebuilds that screen | memoize the promise; re-steal if the game rebuilds |
-| 24 | BO `setFov` 192 vs 185 | clamps to ≥ 2, but the stolen range has `min='5'`, so the browser clamps to 5 and zoom beyond ~14× does nothing | set `el.min = '2'` |
-| 25 | BO `setFov` 193 + game `oninput` | the transient zoom FOV is saved to `mc.fov`; after a reload while zoomed the game rejects < 30 (game:main.js:223-226) and the FOV resets to 70 | add a `temp` flag to `fov.set` that skips persistence |
-| 26 | BO `onKeyCaptureImpl` 608/614, `keyName` 584 | allocates `modKeySet()` per key event; remapped modifiers get `key:'ShiftLeft'` and keep the source's `shiftKey` flags | cache `modKeySet` on register; add Shift/Control names and flags |
-| 28 | BO `bindEntry` 639-640 | mod keybinds are set without checking for conflicts with game keys or other mods (only the reverse is blocked: a game action can't take a mod's key, 608) | reject codes used by `GAME_ACTIONS` or other mods |
+| 1 | SH `patchCloud` 561-569 | regex literals use `\\s`/`\\(`, so they never match (known in compat). The inserted text `'\\nuniform…'` is a literal backslash-n, so fixing only the regex would produce a GLSL compile error | single escapes in both regexes and `'\n'` in the string; then remove `known` in compat |
+| 6 | SH K listener 2467-2478 | partly fixed in 1.4.0: it has the capture guards and is saved (`set('enabled')`). But it isn't registered through `registerKeybind`, so it can't be rebound, isn't in the Keybinds tab, and isn't in BO's `modKeySet`. A game action rebound to K, or a remap from K, also toggles the shaders when SH's listener runs first | `registerKeybind({id:'shaders', …})` once the bus exists, storing the key in `tc.shader.key` or the bus |
+| 10 | SH `getUniformLocation` 796-808, `onSprite` 600-604, `updateState` 956-996 | the sun is "the first `uC` after `uTop`" (sprite, pChat and signs all use `uC`) and day = the zenith's blue channel; both depend on game draw order and palette. compat checks the draw order, not the palette | tag only the sprite program's `uC`; derive day from the sun height |
+| 11 | SH `drawShadowSet` 1431-1448, `shadowProg` 1246-1255 | assumes one `TRIANGLES/UNSIGNED_INT/offset 0` draw per VAO (true today, game:gfx.js:1340) and the atlas on unit 0 at the first terrain draw (game:gfx.js:1257-1258). Both are compat-checked | store `mode/type/offset` in `rec`; bind the atlas explicitly |
+| 17 | BO `toggleHud` 261-264, `hudRow` 581-583 | `hud.on` is saved but never applied at load and not updated by a real F1, so the label desyncs. "Reset all options" is safe: it calls `sendF1(true)` (1293), which reads `#hudtop` and also restores a HUD hidden by a real F1 | label from `#hudtop.hidden` (outside menus), or apply `hud.on` at startup |
+| 18 | BO init 1424 (`uiTimer`), `reassertUiScale` 288-296 | `setInterval(reassertUiScale, 250)` runs forever. At scale 1 it returns after a `bus.get` (289-290), but at any other scale it recomputes `uiBase()` (`matchMedia`) and reads three CSS properties 4× a second | MutationObserver on `<html style>`, or reassert on resize only |
+| 19 | BO `uiBase` 271-279, `applyUiScale` 280-287 | copies the game formula (game:main.js:516-525) and re-runs `matchMedia('(pointer: coarse)')` on each call. It also overwrites `--u/--d` even at scale 1, and `hp` is unused | multiply the game's current value; do nothing when `m === 1` |
+| 20 | BO 62, 324, 343, 617 | `catch (e) {}` in `emit`, `patchHudScale`, `patchSurvivalScale`, `onKeyCapture` hides failures | `console.warn(TAG, …)` once |
+| 21 | BO `Hud.draw` wrapper 312, `wrapScale` 317-322 | `Object.assign` every HUD frame when scale ≠ 1. The `suggestions/tab/hint` wrappers allocate a rest-args array on every call, even at scale 1 | mutate and restore `o.gs`; use fixed-arity wrappers |
+| 22 | BO `redrawButtonLabels` 346, observer 382 | re-renders every `button.mcb` label on each screen rebuild even at scale 1 | return early when `m === 1` and `__tcPx` is unset |
+| 23 | BO `stealFovInput` 176-192 | no in-flight guard: the early return (177) memoizes only a finished result, and `fovInput` is set after `await menus()` (178, 183), so two first calls in the same task each open and close the game's Options screen. That's a narrow window today: every body after the await is synchronous, and callers (`openMenu` 1380, the FOV slider, `resetAll` 1294, Zoom) run in separate events. It also caches a detached `<input>` for good and relies on its `oninput` closure (game:menus.js:1805-1809), even after "Game options…" rebuilds that screen | memoize the promise; re-steal if the game rebuilds |
+| 24 | BO `setFov` 194 vs 187 | clamps to ≥ 2, but the stolen range has `min='5'`, so the browser clamps to 5 and zoom beyond ~14× does nothing | set `el.min = '2'` |
+| 25 | BO `setFov` 195 + game `oninput` | the transient zoom FOV is saved to `mc.fov`; after a reload while zoomed the game rejects < 30 (game:main.js:224-227) and the FOV resets to 70 | add a `temp` flag to `fov.set` that skips persistence |
+| 26 | BO `onKeyCaptureImpl` 628/634, `keyName` 604 | allocates `modKeySet()` per key event; remapped modifiers get `key:'ShiftLeft'` and keep the source's `shiftKey` flags | cache `modKeySet` on register; add Shift/Control names and flags |
+| 28 | BO `bindEntry` 659-660 | mod keybinds are set without checking for conflicts with game keys or other mods (only the reverse is blocked: a game action can't take a mod's key, 628). That now includes BO's own overlay key: binding it to, say, F3 would toggle the overlay and the game's debug screen together | reject codes used by `GAME_ACTIONS` or other mods |
 | 31 | ZM `registerWithBus` 133-135 | polls every 200 ms forever when BO isn't installed | cap retries (for example 50) |
 | 32 | ZM `changed` callback 136 | `refreshConfig` runs on any bus change (every key, `'__sections'`, and each key `bus.reset()` re-announces); resets the wheel-adjusted `zoom` (118) mid-zoom without re-applying FOV | filter `k.startsWith('zoom.')`; skip while `zooming` |
-| 33 | ZM default `KeyC` 15 | the game uses `KeyC` to confirm the undo preview (game:main.js:2481-2484); both fire (no `preventDefault`) | skip while the undo preview is up, or change the default |
-| 34 | ZM `start` 85-91 | without an earlier steal, the first zoom triggers it: the game Options screen flashes and pointer lock is lost and re-requested (ZM:73 / BO:188) (inferred UX). With BO, opening its menu once (BO:911) does the steal first | steal the FOV input once at load |
-| 35 | CH keydown 84-89 | the microtask runs right after this capture listener (microtask checkpoint between listeners for browser events), before the game's `if (suggest.key(e)) e.preventDefault()` (game:main.js:2466), so history and suggestions both move on Up/Down | check the suggestion list's visibility, or defer with `setTimeout(0)` |
+| 33 | ZM default `KeyC` 15 | the game uses `KeyC` to confirm the undo preview (game:main.js:2534-2537); both fire (no `preventDefault`) | skip while the undo preview is up, or change the default |
+| 34 | ZM `start` 85-91 | without an earlier steal, the first zoom triggers it: the game Options screen flashes and pointer lock is lost and re-requested (ZM:73 / BO:190) (inferred UX). With BO, opening its menu once (BO:1380) does the steal first | steal the FOV input once at load |
+| 35 | CH keydown 84-89 | the microtask runs right after this capture listener (microtask checkpoint between listeners for browser events), before the game's `if (suggest.key(e)) e.preventDefault()` (game:main.js:2519), so history and suggestions both move on Up/Down | check the suggestion list's visibility, or defer with `setTimeout(0)` |
 | 36 | CH `up/down` 51-64 | no `preventDefault`, so the input's default ArrowUp caret move runs after `setValue` (inferred), leaving the caret at the start | `preventDefault` once you know you're handling the key |
 | 37 | CH keydown 70 | doesn't check `__tcOptions.capturing`/`__tcCaptured` (rule); low risk because it runs only while chat is open | add the guard for consistency |
-| 44 | BO `setFov` 192-193 | same root cause as 25: it clamps FOV to 2-110 and writes it to `mc.fov`, but the game only accepts 30-110 on load (game:main.js:223-226), so any FOV below 30 comes back as 70. BO's own `syncFov` (172) now ignores such a value | fix with 25: keep the stored `mc.fov` at 30 or more, and hold the low zoom FOV only in memory |
-| 45 | BO `patchHudScale` 310 + 320 | **hint and tab are scaled twice** when UI scale ≠ 1. `Hud.draw` passes its already-scaled `o.gs` to `this.hint`/`this.tab` (game:ui.js:741-742, their only callers), and the `wrapScale('hint'/'tab')` wrappers scale it again (gs·m²). `hint` partly clamps to the screen; the `tab` player list doesn't | drop the `hint`/`tab` wrappers (`draw` already covers them), keeping `suggestions` |
-| 46 | SH `SHADOW_VS` 946 | copies only the plain tile UV, but the game's terrain VS remaps UVs for shaped faces (`aPos.y >> 12u`, `RECT[]`/`BOXUV[]`), so cutout shadows of shaped blocks (torches...) sample the wrong texels | port the game VS's UV remap into `SHADOW_VS` |
-| 48 | BO `keybindsSection` 678-682 | "Reset all keybinds" calls each mod's `reset()` with no per-keybind try/catch: one that throws stops the loop and skips `refresh()` (the button's handler only logs it) | wrap each call, as `resetAll` does (815-817) |
-| 49 | SH globals 612, 764, 788 vs game:dragonview.js:54 | all GL state (`G`, `ST`, `rec`, `curInfo`, `frameId`) is shared by every WebGL2 context on the page. Only frame counting is per context (`mainGL` = the first context to use a patched program, 977). A second context that drew patched terrain would use the main context's FBO and textures | keep state per context (`WeakMap<gl,…>`), or leave programs of other contexts unpatched |
-| 50 | SH `inFootprint` 887, `finalizeShadow` 875-876 | the footprint test assumes a 128-tall chunk column centred at y = 64 (the world is 128 tall today) | derive it from the game's world height, with a compat entry |
-| 51 | SH `terrainDraw` 1253, `drawShadowSet` 1144 | a remesh that keeps the same index count isn't seen as a change, so the shadow can stay stale until the 2 s `age` refresh. Worse, `e.n` only updates when the game draws the part: a chunk remeshed off-screen (behind the camera) keeps its old count, so the `age` refresh replays the new VBO with the old count. That truncates its shadow, or reads past the buffer when the mesh shrank (WebGL then fails the draw, inferred). Pre-existing | watch the recorded parts' buffer uploads (`bufferData` on the reused VAO's buffers, inferred) and take the count from there, or skip records whose buffer changed since they were last drawn |
-| 53 | SH `PROGS` 610, 679 | filled with every patched program's info but never read | remove it, or list the programs in `debug()` |
-| 54 | SH `hookError` 620-629 | the error budget is for the page's lifetime, not a rate: 20 unrelated, transient errors over a long session (one per hour, say) pause every effect until a reload | count per time window (for example 20 per minute), or decay `ERR.n` after a run of clean frames |
-| 55 | CH keydown 71 | the IME check is `e.isComposing \|\| e.keyCode === 229`, but the game's `composing(e)` (game:main.js:2334) also checks its own `compose.on` flag, set from `#chatbox` `compositionstart`/`compositionend` (game:main.js:2583-2597). In rare IME cases, an Enter that ends a composition could still be recorded as a sent line | track `compositionstart`/`compositionend` on `#chatbox` the same way |
+| 44 | BO `setFov` 194-195 | same root cause as 25: it clamps FOV to 2-110 and writes it to `mc.fov`, but the game only accepts 30-110 on load (game:main.js:224-227), so any FOV below 30 comes back as 70. BO's own `syncFov` (174) now ignores such a value | fix with 25: keep the stored `mc.fov` at 30 or more, and hold the low zoom FOV only in memory |
+| 45 | BO `patchHudScale` 312 + 320 | **hint and tab are scaled twice** when UI scale ≠ 1. `Hud.draw` passes its already-scaled `o.gs` to `this.hint`/`this.tab` (game:ui.js:742-743, their only callers), and the `wrapScale('hint'/'tab')` wrappers scale it again (gs·m²). `hint` partly clamps to the screen; the `tab` player list doesn't | drop the `hint`/`tab` wrappers (`draw` already covers them), keeping `suggestions` |
+| 46 | SH `SHADOW_VS` 1219-1234 | copies only the plain tile UV, but the game's terrain VS remaps UVs for shaped faces (`aPos.y >> 12u`, `RECT[]`/`BOXUV[]`), so cutout shadows of shaped blocks (torches...) sample the wrong texels | port the game VS's UV remap into `SHADOW_VS` |
+| 49 | SH globals 711, 914, 937, 1596 vs game:dragonview.js:54 | all GL state (`G`, `ST`, `SC`, `rec`, `curInfo`, `frameId`) is shared by every WebGL2 context on the page. Only frame counting, the scene FBO, the viewport hook and the buffer tracking are per context (`mainGL` = the first context to use a patched program, 1263). A second context that drew patched terrain would use the main context's shadow FBO and textures | keep state per context (`WeakMap<gl,…>`), or leave programs of other contexts unpatched |
+| 50 | SH `inFootprint` 1163-1171, `snapCascade` 1147-1160 (`hx/hy`) | the footprint test assumes a 128-tall chunk column centred at y = 64 (the world is 128 tall today) | derive it from the game's world height, with a compat entry |
+| 53 | SH `PROGS` 709, 779 | filled with every patched program's info but never read | remove it, or list the programs in `debug()` |
+| 54 | SH `hookError` 720-728 | the error budget is for the page's lifetime, not a rate: 20 unrelated, transient errors over a long session (one per hour, say) pause every effect until a reload | count per time window (for example 20 per minute), or decay `ERR.n` after a run of clean frames |
+| 55 | CH keydown 71 | the IME check is `e.isComposing \|\| e.keyCode === 229`, but the game's `composing(e)` (game:main.js:2387) also checks its own `compose.on` flag, set from `#chatbox` `compositionstart`/`compositionend` (game:main.js:2658-2672). In rare IME cases, an Enter that ends a composition could still be recorded as a sent line | track `compositionstart`/`compositionend` on `#chatbox` the same way |
+| 56 | SH `composite` 1831-1872, `renderShadow` 1453-1494, `perfFrame` 2125-2157, `allocScene` 1746-1770 | new in 1.5.0. The composite reads 4 `isEnabled` on every composited frame, and the shadow pass 4 per refresh. Chrome answers `isEnabled` from its client-side state cache (SH's measurement), but another browser or a future Chrome could make each one a round trip to the GPU process. `perfFrame` also calls `getParameter(GPU_DISJOINT_EXT)` every 250 ms, and `allocScene` calls `getParameter(ACTIVE_TEXTURE)` on each reallocation (rare) | track the capabilities in `enable`/`disable` wrappers (the game toggles them in known places), as `VP` already does for the viewport; only if profiling shows a stall |
+| 59 | SH `bufferData` wrapper/`remeshed` 875-895, `trackColumn` 1516-1533, `drawShadowSet` 1431-1448; game:gfx.js:1002-1004 | **an emptied off-screen part keeps casting its shadow until it is seen.** When a part's mesh becomes empty, `gfx.setChunk` only sets `p.n = 0`, with no `bufferData` (a compat-documented limitation), so the remesh hook never sees it and the record keeps its old count. `trackColumn` drops the record only once its column is drawn again with the sibling part but without this one, so a part emptied behind the camera (a broken tree, say) still casts in both tiles until the player looks at it. A column whose opaque and cutout parts both emptied is never dropped while it stays inside the shadow map (the 60 s guard only forgets records outside it) | wrap the exported `Gfx.prototype.setChunk` to zero the record of a part whose new data is empty (with a compat entry), or treat a recorded part that isn't drawn while its column is in view as empty |
+| 61 | SH `perfFrame` 2125-2157 vs `govSample` 1900-1912 | new in SH4. `perf.gpuMs` (BO's F2 overlay) is still the mean GPU time of each 250 ms window, while Auto decides on the median of 16 samples (`debug().governor.gpuMs`). External GPU spikes (bursts of 2-5 samples at 20-37 ms, LAB2) lift the mean, so the overlay can read over the 12.7 ms mark while Auto rightly keeps the scale. SH5 widened the gap a little: the governor also skips the first `GOV_SETTLE` frames after each change, which the mean still counts. Under vsync the capped marks are also not the whole story any more (a capped drop needs real misses), so an overlay reading over 14.2 ms at 60 Hz with no misses is expected (DVFS) | publish the median too (for example `perf.gpuMedMs`) and show it in the overlay, or say "mean" in the overlay |
+| 62 | SH `govern` 1984 (`rf`, 2010; the marks, 2015) | new in SH4, narrow, an in-game check. **The cadence `rf` can stay at 30 Hz on a 60 Hz display.** After about 8.5 s of steady 30 fps with a light GPU (CPU-bound meshing, say, or Chrome's Energy Saver turned off again), `rf` adopts about 33 ms and later follows a faster cadence only when the frames get faster. If a GPU load of 17-28 ms then holds the frames at a steady 33 ms, it is under the capped high mark (28.4 ms at 30 Hz) and under the miss rule's budget, so Auto never drops, and the frames stay at 30 fps where a lower scale would give 60. Since SH5 the capped drop also needs two real misses over `1.05 × rf` (about 35 ms), which a steady 33 ms doesn't produce either, so the outcome is the same. Not fixed: the obvious re-test (drop `rf` back while the GPU needs more than half of it) would make a real 30 Hz cap with a 17-28 ms GPU oscillate | in game: watch `debug().governor` and F2 after a CPU-bound stretch; if seen, re-test `rf` only on a cadence change that the GPU time can't explain |
+| 63 | SH `govSample` 1900-1912, `govFits` 1935-1940, `govTable` 2114-2118; `govReset` 1962-1966 | new in SH4, bounded. The per-scale table is cleared only by `govReset` (`bench()`), not when a Quality preset or K changes the frame's cost. A stale entry that still passes `govFits`'s ±0.75 ms consistency test can cause one extra raise, then a drop, after a preset switch or K. The entry is overwritten after 5 samples at that scale, so the cost is one round trip | clear `GOV.tn` when a quality key or `enabled` changes (in `set`/`applyPreset`), if the round trip shows in game |
+| 64 | SH `NEAR_SPARE` 1035, `finalizeShadow` 1075 | new in SH4, a visual item for the in-game check. The near tile's radius is `24 + max(shadowMove, 8)`, so it covers more ground at the same resolution: `En` 28 → 32 blocks on High and 26 → 32 on Ultra, i.e. near-tile texels 14-23% larger and close shadows a little softer. It bought far fewer near redraws (LAB2: 216 → 120/min on High-moving, 367 → 120 on Ultra-moving) | if close shadows look soft, lower `NEAR_SPARE` for High/Ultra only, or raise the near tile's size where `MAX_TEXTURE_SIZE` allows |
+| 65 | SH `govern` 1984 (the drop search, 2054-2067; the raise, 2091-2103), `govPredict` 1920-1934 | an SH5 open note, uncapped only (a bench, not a player at 60 Hz vsync). **In some runs uncapped High settles at 0.85 instead of 0.9-1.** After a drop from 1.0 it lands at 0.85 because 0.9 is predicted over the 12.0 ms budget, and from there no raise rule fires (inferred from the rules; `reports/bench-sh5-v7.json`: High Auto 0.85 at a 11.0 ms median and 14.45 ms p95gb2, which holds 60; SH4's final bench had it at 1.00). This is base behaviour that SH5 didn't introduce: the 0.95 skip only changes which steps exist above 0.9 | only if it matters in a bench: check how far `govPredict(0.9)` over-reads (the `COMP_MS` prior plus the fit's `b`) against a measured 0.9, or let a raise from 0.85 probe 0.9 when it is predicted under the high mark rather than the budget (the SH5 backoff now limits a failed probe) |
