@@ -83,6 +83,22 @@ Every script change follows the **`tweetcraft-dev-pipeline`** skill:
   `userscript-reviewer` and then the cloud test, and hands over. Speed never skips a phase. Details: "Run it as a team"
   in the skill.
 
+## North star and to-do list
+
+`VISION.md` holds the project's north star (every shader setting at maximum, a locked 60 FPS, no jitter, in a real
+world at native resolution), its ethos and **the project's only to-do list**. Read it before any performance or shader
+work. The list is a strict timeline, worked from the top, with no side work: anything new gets a place on it before it
+starts, and the only exception is a game update that breaks a script. When the user mentions a to-do, a "to-do item" or
+anything that matches a name on that list, read it first and work from what it says. Delete an item as soon as it's
+done. Being next on the list is not a request to start it: wait for the user.
+
+## Private notes
+
+`private/` is gitignored and holds details of the user's machine and setup that stay out of this public repo: the
+exact laptop model, BIOS, Windows build and update state, installed software. Read `private/machine.md` before any
+work on the laptop itself. Never copy its contents into a tracked file, commit message, issue or CI log. Public files
+name the chip only (i7-8650U, UHD 620).
+
 ## Knowledge base
 
 - `.claude/codemap/README.md`: repo layout, how the pieces relate, and **where new things belong**

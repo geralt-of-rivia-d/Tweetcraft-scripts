@@ -9,5 +9,9 @@ dev/
 # Smoke test reports and screenshots
 reports/
 
+# Private machine notes and the project vision (never commit)
+private/
+VISION.md
+
 # Personal Claude Code settings (never commit)
 .claude/settings.local.json
