@@ -160,6 +160,7 @@ const { values: opts } = parseArgs({
     'no-vsync-pass': { type: 'boolean', default: false },
     'vsync-seconds': { type: 'string' },
     'vsync-repeat': { type: 'string' },
+    prewarm: { type: 'string' },
     rd: { type: 'string', default: '12' },
     fov: { type: 'string', default: '80' },
     'held-light': { type: 'string' },
@@ -197,6 +198,9 @@ Decisions in 1-2 runs (look first: npm run bench:history -- --scenario <name>):
   --skip-vanilla      with --repeat >= 2, don't add vanilla to every pass (the preflight calibration is the reference).
   @warp=K             per row, e.g. "vanilla,vanilla@warp=1": A/B the warp itself in one run.
   --no-vsync-pass     accept without the vsync pass. --vsync-seconds / --vsync-repeat size it (profile: 30 s x 2).
+  --prewarm N         open N windows at launch and give one to each row, so all of them stay on the virtual desktop that
+                      was active then (see prewarmWindows). Writes reports/.prewarm-done when they are open. Size it for
+                      1 + rows x passes + a few retries. Use with --no-vsync-pass: an accept's vsync child opens later.
 
 Scenarios: vanilla | off | <low|medium|high|ultra|current>[+key=value]...[-moving|-sprint|-stress]
   -moving   Twitterentary.stress({moveSpeed: 11}): creative flying (~11 blocks/s), camera drift for the shadow refresh
@@ -867,6 +871,7 @@ if (PREFLIGHT) {
 try {
   browser = await launchBrowser({ gpu: true, angle: opts.angle, headless: opts['headless-gpu'], vsync: VSYNC, args: opts['chrome-arg'] || [], owner: `bench ${label}` });
   env.chrome = browser.version();
+  if (opts.prewarm !== undefined) await prewarmWindows(browser, Number(opts.prewarm));
   // Once we hold the lock, lock-aware tools wait; a SwiftShader browser still running predates the lock (or ignores it).
   heavyBefore = await heavyProcesses();
   const swBefore = heavyBefore.filter(p => p.startsWith('SwiftShader'));
@@ -1035,7 +1040,7 @@ process.exit(failures || vsyncFailed ? 1 : 0);
 
 /** The parent's arguments for the vsync child, minus what the child sets itself (label, out, compare, sizes). */
 function childArgv(args) {
-  const drop = new Set(['--label', '--out', '--compare', '--seconds', '--repeat', '--vsync-seconds', '--vsync-repeat']);
+  const drop = new Set(['--label', '--out', '--compare', '--seconds', '--repeat', '--vsync-seconds', '--vsync-repeat', '--prewarm']);
   const dropFlag = new Set(['--vsync-pass', '--no-vsync-pass', '--preflight', '--no-preflight', '--strict']);
   const out = [];
   for (let i = 0; i < args.length; i++) {
@@ -1049,6 +1054,33 @@ function childArgv(args) {
 function fmtDur(s) { return typeof s === 'number' ? (s >= 90 ? `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, '0')}s` : `${Math.round(s)}s`) : '?'; }
 
 // ---------------------------------------------------------------------------------------------
+
+/**
+ * --prewarm N. Windows puts a new top-level window on the active virtual desktop, and refuses to move another process's
+ * window (MoveWindowToDesktop: 0x80070005), so a bench started on another desktop would open every later row on the
+ * desktop the user went back to. So all the windows are opened now, and each newContext() takes one. A retry past the
+ * end of the pool falls back to a real new window, with a WARN, because that one lands on the user's desktop.
+ */
+async function prewarmWindows(browser, n) {
+  if (!(Number.isInteger(n) && n >= 1 && n <= 64)) fail('--prewarm must be a whole number from 1 to 64');
+  const ctxOpts = FULLSCREEN ? { viewport: null } : { viewport: VIEW, deviceScaleFactor: 1 };
+  const real = browser.newContext.bind(browser), pool = [];
+  for (let i = 0; i < n; i++) {
+    const ctx = await real(ctxOpts), page = await ctx.newPage(), newPage = ctx.newPage.bind(ctx);
+    ctx.newPage = async () => { ctx.newPage = newPage; return page; };
+    pool.push(ctx);
+  }
+  browser.newContext = async o => {
+    const ctx = pool.shift();
+    if (ctx) return ctx;
+    warn('--prewarm: the window pool is empty, so this row opens a new window on the active desktop');
+    return real(o);
+  };
+  env.prewarm = n;
+  await mkdir(REPORTS_DIR, { recursive: true });
+  await writeFile(join(REPORTS_DIR, '.prewarm-done'), String(n));
+  console.log(c.dim(`  prewarmed ${n} window(s)`));
+}
 
 async function uncapCheck(browser) {
   const ctx = await browser.newContext(FULLSCREEN ? { viewport: null } : { viewport: VIEW, deviceScaleFactor: 1 });

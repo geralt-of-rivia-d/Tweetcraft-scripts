@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitterentary shaders
 // @namespace    tweetcraft.twitterentary
-// @version      1.5.0
+// @version      1.5.1
 // @author       andrestube123
 // @description  Adds shader-style lighting, sun shadows, waving plants, reflective water, and a dynamic sky to TweetCraft, with Quality and Look presets.
 // @match        https://tweetcraft.jai.vin/*
@@ -30,11 +30,6 @@
         shadowTaps: 8, // unused since 1.4.0 (replaced by shadowFilter); kept so old settings still parse
         shadowCull: true, // debug: back-face culling in the shadow pass
         shadowCascades: true, // no UI row: near + far shadow tiles (false = one map, as in 1.4.0)
-
-        // Dynamic resolution: 0 = Auto (holds 60 FPS between renderScaleMin and 1), else a fixed scale.
-        renderScale: 0,
-        renderScaleMin: 0.6,
-        sharpen: 0.5,
 
         waving: true,
         leafSway: 0.028,
@@ -66,9 +61,6 @@
         { key: 'shadowFilter', label: 'Shadow edges', type: 'choice', options: [[0, 'Hard'], [1, 'Soft'], [2, 'Softer']], group: 'quality', section: 'Quality' },
         { key: 'shadowEvery', label: 'Shadow update limit (frames)', type: 'num', min: 1, max: 30, step: 1, group: 'quality', section: 'Quality' },
         { key: 'shadowMove', label: 'Shadow update distance', type: 'num', min: 1, max: 16, step: 1, group: 'quality', section: 'Quality' },
-        { key: 'renderScale', label: 'Render scale', type: 'choice', options: [[0, 'Auto'], [1, '100%'], [0.9, '90%'], [0.8, '80%'], [0.7, '70%'], [0.6, '60%'], [0.5, '50%']], group: 'quality', section: 'Performance' },
-        { key: 'renderScaleMin', label: 'Auto: lowest scale', type: 'num', min: 0.5, max: 1, step: 0.05, group: 'quality', section: 'Performance' },
-        { key: 'sharpen', label: 'Upscale sharpening', type: 'num', min: 0, max: 1, step: 0.05, group: 'quality', section: 'Performance' },
         { key: 'sunStrength', label: 'Sun light', type: 'num', min: 0, max: 2, step: 0.05, group: 'look', section: 'Look' },
         { key: 'ambientStrength', label: 'Ambient light', type: 'num', min: 0, max: 2, step: 0.05, group: 'look', section: 'Look' },
         { key: 'blockLight', label: 'Block light', type: 'num', min: 0, max: 2, step: 0.05, group: 'look', section: 'Look' },
@@ -92,14 +84,12 @@
     const RANGE = {};
     for (const k in CFG) { const f = FIELD[k]; RANGE[k] = f && f.type === 'num' ? [f.min, f.max] : (HIDDEN_RANGE[k] || null); }
 
-    // Every Quality preset runs dynamic resolution on Auto.
-    const DRS_AUTO = { renderScale: 0, renderScaleMin: 0.6, sharpen: 0.5 };
     const PRESETS = deepFreeze({
         quality: [
-            { id: 'low', name: 'Low', desc: 'No sun shadows. Fastest.', values: Object.assign({ shadows: false }, DRS_AUTO) },
-            { id: 'medium', name: 'Medium', desc: '2048 shadows, 56-block range, soft edges.', values: Object.assign({ shadows: true, shadowSize: 2048, shadowExtent: 56, shadowFilter: 1, shadowEvery: 8, shadowMove: 6 }, DRS_AUTO) },
-            { id: 'high', name: 'High', desc: 'Sharp near shadows, 72-block range, quicker updates.', values: Object.assign({ shadows: true, shadowSize: 2048, shadowExtent: 72, shadowFilter: 1, shadowEvery: 4, shadowMove: 4 }, DRS_AUTO) },
-            { id: 'ultra', name: 'Ultra', desc: 'Sharp near shadows, 96-block range, softest edges, fastest updates.', values: Object.assign({ shadows: true, shadowSize: 2048, shadowExtent: 96, shadowFilter: 2, shadowEvery: 2, shadowMove: 2 }, DRS_AUTO) }
+            { id: 'low', name: 'Low', desc: 'No sun shadows. Fastest.', values: { shadows: false } },
+            { id: 'medium', name: 'Medium', desc: '2048 shadows, 56-block range, soft edges.', values: { shadows: true, shadowSize: 2048, shadowExtent: 56, shadowFilter: 1, shadowEvery: 8, shadowMove: 6 } },
+            { id: 'high', name: 'High', desc: 'Sharp near shadows, 72-block range, quicker updates.', values: { shadows: true, shadowSize: 2048, shadowExtent: 72, shadowFilter: 1, shadowEvery: 4, shadowMove: 4 } },
+            { id: 'ultra', name: 'Ultra', desc: 'Sharp near shadows, 96-block range, softest edges, fastest updates.', values: { shadows: true, shadowSize: 2048, shadowExtent: 96, shadowFilter: 2, shadowEvery: 2, shadowMove: 2 } }
         ],
         look: [
             { id: 'natural', name: 'Natural', desc: 'Neutral sunlight, true-to-texture colour.', values: { sunStrength: 0.75, ambientStrength: 1.0, blockLight: 0.9, aoPower: 1.3, emissive: 1.0, exposure: 1.0, saturation: 1.0, contrast: 1.0 } },
@@ -184,7 +174,7 @@
     for (const k of ['shaderSource', 'compileShader', 'attachShader', 'linkProgram', 'useProgram',
         'bindVertexArray', 'deleteVertexArray', 'getUniformLocation', 'uniform1f', 'uniform1i', 'uniform3f', 'uniform3fv',
         'uniform4f', 'uniformMatrix4fv', 'drawElements', 'clear', 'texImage3D', 'texSubImage3D',
-        'viewport', 'bindFramebuffer', 'drawArrays', 'bindBuffer', 'bufferData', 'uniform2f']) {
+        'viewport', 'bindFramebuffer', 'bindBuffer', 'bufferData']) {
         O[k] = proto[k];
     }
 
@@ -220,10 +210,18 @@
 
     // ---------------------------------------------------------------- GLSL
 
+    // The atlas layer of a vertex. Since build 6b3963e444 it is 9 bits: bit 8 sits in bit 9 of aPos.z. The game's own
+    // `layer` local comes after the line we insert at, so we decode it ourselves. A build without that decode (staging
+    // today) has only aInfo.x. patchTerrainVS detects it; the shadow programs read the result in initGL, which runs
+    // after it because the game's first program is a terrain one (gfx.js; a runtime compat check reads the decode).
+    let layerBits = 8;
+    const layerDecl = () => `int tcLayer = ${layerBits === 9 ? 'int(aInfo.x | (((aPos.z >> 9u) & 1u) << 8u))' : 'int(aInfo.x)'};`;
+
     function patchTerrainVS(src) {
         const re = /vec3\s+p\s*=\s*vec3\(\s*aPos\s*&\s*uvec3\(\s*0x1FFu\s*,\s*0xFFFu\s*,\s*0x1FFu\s*\)\s*\)\s*\*\s*0\.0625\s*\+\s*uOrigin\s*;/;
         if (!/aPos\s*&\s*uvec3/.test(src) || !src.includes('uniform vec3 uOrigin;') ||
             !re.test(src) || !src.includes('out vec2 vLight;')) return null;
+        layerBits = /aPos\.z\s*>>\s*9u/.test(src) ? 9 : 8;
 
         // One output: vTcP = (camera-relative position, layer class). On the UHD 620 every extra varying row costs
         // per vertex and per primitive (rd 12: ~2.5 ms with the 1.5.0 betas' vRel + flat vCls + vTcBlk); the class
@@ -250,7 +248,10 @@
 
         return s.replace(re, m => `${m}
   float tcC = 0.0;
-  if (uFx > 0.5) tcC = floor(texelFetch(uClsTex, ivec2(int(aInfo.x), 0), 0).r * 255.0 + 0.5);
+  if (uFx > 0.5) {
+    ${layerDecl()}
+    tcC = floor(texelFetch(uClsTex, ivec2(tcLayer, 0), 0).r * 255.0 + 0.5);
+  }
   vTcP = vec4(p, tcC);${wave}`);
     }
 
@@ -620,10 +621,10 @@ ${mode === 2 ? WATER_CODE : ''}
         Array.prototype.indexOf = idxHook;
         setTimeout(unhook, 60000);
     } catch (e) { console.warn(TAG, 'names hook failed', e); }
-    const RE_EMIT = /lava|magma|lumen|glowstone|torch|lantern|fire|beacon|shroomlight|sea_lantern|jack_o|redstone_lamp_on|campfire/i;
+    const RE_EMIT = /lava|magma|lumen|glowstone|torch|lantern|fire|beacon|shroomlight|sea_lantern|jack_o|redstone_lamp_on|spark_lamp_on|campfire/i;
     const RE_PLANT = /^(short_grass|grass|tall_grass.*|fern|large_fern.*|.*sapling|.*_tulip|poppy|dandelion|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|rose_bush.*|peony.*|lilac.*|sunflower.*|dead_bush|sugar_cane|.*seagrass.*|kelp.*|wheat_stage.*|carrots_stage.*|potatoes_stage.*|beetroots_stage.*|vine|sweet_berry_bush.*|torchflower.*|pitcher.*|.*_roots|.*_sprouts|bush|flower.*)$/i;
     function nameClass(nm) {
-        if (RE_EMIT.test(nm) && !/torch_top|lantern_top/.test(nm)) return 4;
+        if (RE_EMIT.test(nm) && !/torch_top|torch_off|lantern_top/.test(nm)) return 4;
         if (/leaves/i.test(nm)) return 1;
         if (/^water/i.test(nm)) return 3;
         if (RE_PLANT.test(nm)) return 2;
@@ -708,7 +709,7 @@ ${mode === 2 ? WATER_CODE : ''}
     const progInfo = new WeakMap();
     const PROGS = [];
 
-    let curInfo = null, curVAO = null, curProg = null, frameId = 0, shadowFrame = -1, mainGL = null;
+    let curInfo = null, curVAO = null, frameId = 0, shadowFrame = -1, mainGL = null;
     const lastOrigin = [0, 0, 0];
     let haveOrigin = false;
     const rec = new Map();   // chunk-part VAO -> record (opaque and cutout parts)
@@ -736,11 +737,18 @@ ${mode === 2 ? WATER_CODE : ''}
     const U3 = ['uSunDir', 'uSunCol', 'uZenith', 'uSkySun', 'uCloudTint', 'uAmb0', 'uAmb1', 'uSunC', 'uSkyGlow', 'uTcLm0'];
     const V1 = new Float64Array(U1.length), V3 = new Float64Array(U3.length * 3);
 
+    // The game's flat varying vGlass: we keep terrain programs free of them (no measured gain from this one). It is 0 or 1
+    // and constant over a quad, so a smooth varying keeps it and the game's 0.5 test can't flip. It goes from every
+    // source, also those patchSource leaves alone (the stained-glass depth FS, a paged FS), because ESSL 3.00 needs both
+    // stages to agree. d.orig stays pristine, so the compile and link fallbacks restore both stages together.
+    const FLAT_GLASS = /\bflat\s+(out|in)\s+float\s+vGlass\s*;/g;
+
     proto.shaderSource = function (shader, source) {
         if (typeof source !== 'string') return O.shaderSource.call(this, shader, source);
         let out = source, info = null;
         try {
-            const r = patchSource(source);
+            out = source.replace(FLAT_GLASS, '$1 float vGlass;');
+            const r = patchSource(out);
             if (r) { out = r.src; info = r.info; }
         } catch (e) {
             console.error(TAG, 'Shader patch error:', e);
@@ -772,12 +780,17 @@ ${mode === 2 ? WATER_CODE : ''}
         const list = progShaders.get(p) || [];
         if (!list.some(s => shaderSrc.get(s)?.patched)) return;
         if (this.getProgramParameter(p, this.LINK_STATUS)) {
+            // only FLAT_GLASS touched it: still the game's program, with nothing of ours to drive
+            if (!list.some(s => shaderSrc.get(s)?.info)) return;
             const info = { prog: p, loc: null, mode: 0, lit: false };
             for (const s of list) { const d = shaderSrc.get(s); if (d && d.patched && d.info) Object.assign(info, d.info); }
             info.terrain = !!(info.terrainVS && info.terrainFS);
+            // Our terrain VS without our FS (the stained-glass depth pass; every pass on a paged atlas, whose FS we
+            // can't patch): uFx stays 0, so no waving without the lighting that goes with it, as offProgram does.
+            info.vanilla = !!(info.terrainVS && !info.terrainFS);
             progInfo.set(p, info);
             PROGS.push(info);
-            const kind = info.terrain ? 'terrain (mode ' + info.mode + (info.lit ? ', lit' : '') + ')' : info.sky ? 'sky' : info.cloud ? 'clouds' : 'partial';
+            const kind = info.terrain ? 'terrain (mode ' + info.mode + (info.lit ? ', lit' : '') + ')' : info.vanilla ? 'terrain depth or unpatched pass (uFx off)' : info.sky ? 'sky' : info.cloud ? 'clouds' : 'partial';
             console.info(TAG, 'Patched program:', kind);
             return;
         }
@@ -849,7 +862,7 @@ ${mode === 2 ? WATER_CODE : ''}
         return O.texSubImage3D.apply(this, arguments);
     };
 
-    // curVAO / curProg are the main context's bindings (the shadow pass and the composite put them back)
+    // curVAO is the main context's binding (the shadow pass puts it back)
     proto.bindVertexArray = function (v) { if (this === mainGL || mainGL === null) curVAO = v; return O.bindVertexArray.call(this, v); };
     proto.deleteVertexArray = function (v) {
         const e = rec.get(v);
@@ -941,9 +954,7 @@ ${mode === 2 ? WATER_CODE : ''}
     };
     const WHY = ['', 'init', 'dirty', 'move', 'sun', 'age', 'stress'];
     const STATS = {
-        shadowChunks: 0, refreshes: 0, tiles: { near: 0, far: 0, nearChunks: 0, farChunks: 0 }, why: { init: 0, dirty: 0, move: 0, sun: 0, age: 0, stress: 0 }, errors: 0,
-        // scene FBO: active = used last frame, ok = false once disabled after an error, w/h = scene px last frame
-        post: { active: false, ok: true, composites: 0, frame: -1, w: 0, h: 0 }
+        shadowChunks: 0, refreshes: 0, tiles: { near: 0, far: 0, nearChunks: 0, farChunks: 0 }, why: { init: 0, dirty: 0, move: 0, sun: 0, age: 0, stress: 0 }, errors: 0
     };
     // Twitterentary.stress() for benchmarks (in memory only): forced shadow refreshes (shadowRefreshEvery), and an
     // emulated camera drift of moveSpeed blocks/s that only the shadow redraw decision sees (drift, drifted =
@@ -1215,8 +1226,10 @@ void main() {
     const SHADOW_FS_OPAQUE = `#version 300 es
 precision mediump float;
 void main() {}`;
-    // Cutout parts: alpha-tested against the atlas; plants (class 2) don't cast shadows.
-    const SHADOW_VS = `#version 300 es
+    // Cutout parts: alpha-tested against the atlas; plants (class 2) don't cast shadows. Far tile: of the cutout part
+    // only leaves cast, as solid quads (no alpha test, so early depth works).
+    // `skip` = the classes that don't cast; a function, because layerDecl() is only known once the game's VS was seen.
+    const shadowVS = skip => `#version 300 es
 precision highp float;
 precision highp int;
 layout(location=0) in uvec3 aPos;
@@ -1226,14 +1239,13 @@ uniform vec3 uOrigin;
 uniform highp sampler2D uClsTex;
 out vec3 vUV;
 void main() {
-  float c = floor(texelFetch(uClsTex, ivec2(int(aInfo.x), 0), 0).r * 255.0 + 0.5);
-  vUV = vec3(float(aInfo.y & 1u), float((aInfo.y >> 1u) & 1u), float(aInfo.x));
-  if (c > 1.5 && c < 3.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  ${layerDecl()}
+  float c = floor(texelFetch(uClsTex, ivec2(tcLayer, 0), 0).r * 255.0 + 0.5);
+  vUV = vec3(float(aInfo.y & 1u), float((aInfo.y >> 1u) & 1u), float(tcLayer));
+  if (${skip}) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vec3 p = vec3(aPos & uvec3(0x1FFu, 0xFFFu, 0x1FFu)) * 0.0625 + uOrigin;
   gl_Position = uLVP * vec4(p, 1.0);
 }`;
-    // Far tile: of the cutout part only leaves cast, as solid quads (no alpha test, so early depth works).
-    const SHADOW_VS_LEAVES = SHADOW_VS.replace('if (c > 1.5 && c < 3.5)', 'if (c < 0.5 || c > 1.5)');
     const SHADOW_FS = `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
@@ -1298,8 +1310,8 @@ void main() {
             if (status !== gl.FRAMEBUFFER_COMPLETE) throw new Error('Shadow framebuffer incomplete: ' + status);
 
             G.pOpaque = shadowProg(gl, SHADOW_VS_OPAQUE, SHADOW_FS_OPAQUE);
-            G.pCut = shadowProg(gl, SHADOW_VS, SHADOW_FS);
-            G.pCutSolid = shadowProg(gl, SHADOW_VS_LEAVES, SHADOW_FS_OPAQUE); // far tile: leaves only, no alpha test
+            G.pCut = shadowProg(gl, shadowVS('c > 1.5 && c < 3.5'), SHADOW_FS);
+            G.pCutSolid = shadowProg(gl, shadowVS('c < 0.5 || c > 1.5'), SHADOW_FS_OPAQUE); // far tile: leaves only, no alpha test
             G.shadowOk = true;
         } catch (e) {
             console.error(TAG, 'Could not initialize shadows:', e);
@@ -1308,8 +1320,6 @@ void main() {
             O.useProgram.call(gl, prevProg);
             gl.activeTexture(prevActive);
         }
-        try { initPost(gl); } catch (e) { postFail(gl, e); }
-        finally { O.useProgram.call(gl, prevProg); }
         initTimer(gl);
     }
 
@@ -1388,7 +1398,7 @@ void main() {
         }
     }
 
-    // Effects paused: vanilla output (uFx = 0), with our samplers still on their own units so a program
+    // Effects paused, or a program with no patched FS: vanilla output (uFx = 0), with our samplers still on their own units so a program
     // first used now can't put a sampler2D next to the atlas's sampler2DArray on unit 0.
     function offProgram(gl, info) {
         if (info.offDone) return;
@@ -1408,9 +1418,8 @@ void main() {
         if (info !== null && !G.init) initGL(gl);
         O.useProgram.call(gl, p);
         curInfo = info;
-        if (gl === mainGL || mainGL === null) curProg = p;
         if (info === null) return;
-        if (ERR.off) { offProgram(gl, info); return; }
+        if (ERR.off || info.vanilla) { offProgram(gl, info); return; }
         if (info.terrain) OBS.lit = !!info.lit;
         try { applyUniforms(gl, info); } catch (e) { hookError('applyUniforms', e); }
     };
@@ -1453,9 +1462,8 @@ void main() {
     function renderShadow(gl, info) {
         if (!G.shadowOk || !ST.shadowOn || !ST.refresh) return;
         const SH = G.sh, NR = G.nr, size = SH.size, W = Math.max(0, G.nSize) + size;
-        // the framebuffer and viewport the frame is drawing with: tracked by the viewport hook (the game binds
-        // no framebuffer of its own), so no getParameter round trips
-        const prevFB = SC.bound ? SC.fbo : null;
+        // the viewport the frame is drawing with: tracked by the viewport hook, so no getParameter round trip
+        // (the game binds no framebuffer of its own, so null is what goes back)
         if (VP.w === 0) { const v = gl.getParameter(gl.VIEWPORT); VP.x = v[0]; VP.y = v[1]; VP.w = v[2]; VP.h = v[3]; }
         const vx = VP.x, vy = VP.y, vw = VP.w, vh = VP.h;
         const wasCull = gl.isEnabled(gl.CULL_FACE), wasDepth = gl.isEnabled(gl.DEPTH_TEST);
@@ -1482,7 +1490,7 @@ void main() {
         } finally {
             O.useProgram.call(gl, info.prog);
             O.bindVertexArray.call(gl, prevVAO);
-            O.bindFramebuffer.call(gl, gl.DRAW_FRAMEBUFFER, prevFB);
+            O.bindFramebuffer.call(gl, gl.DRAW_FRAMEBUFFER, null);
             O.viewport.call(gl, vx, vy, vw, vh);
             gl.polygonOffset(0, 0);
             if (!wasPO) gl.disable(gl.POLYGON_OFFSET_FILL);
@@ -1583,129 +1591,37 @@ void main() {
         return O.drawElements.call(this, mode, count, type, offset);
     };
 
-    // ---------------------------------------------------------------- scene buffer, dynamic resolution, frame timing
+    // ---------------------------------------------------------------- frame timing
 
-    // gfx.draw() starts every frame with viewport(0, 0, canvas.width, canvas.height): the game's only viewport
-    // call on the main context, and it never binds a framebuffer. At that call the frame is redirected into our
-    // scene FBO at render scale s (its lower-left ceil(w*s) x ceil(h*s) pixels), and a microtask is queued. The
-    // microtask runs right after the game's rAF callback returns (after the crack, hands, fire overlay and HUD,
-    // before the frame is presented) and composites the scene to the canvas: bilinear upscale plus a
-    // contrast-adaptive sharpen. At s = 1, with shaders off, in the tiny .pix menus or after any error, the
-    // frame renders directly, exactly as in vanilla. The 2D HUD and nametags (gfx.project) stay full resolution.
-    const POST = STATS.post;
-    const SC = {
-        fbo: null, color: null, depth: null, tw: 0, th: 0, // scene textures (unit 8 keeps the colour bound)
-        bound: false, sw: 0, sh: 0, cw: 0, ch: 0,          // this frame: scene px, canvas px
-        prog: null, vao: null, uScale: null, uTexel: null, uSharp: null,
-        cx: NaN, cy: NaN, cSharp: NaN, cCheap: NaN, uCheap: null, checks: 0, allocs: 0
-    };
+    // gfx.draw() starts every frame with viewport(0, 0, canvas.width, canvas.height): the game's only viewport call
+    // on the main context. That call times the frame and queues a microtask, which runs right after the game's rAF
+    // callback returns (after the crack, hands, fire overlay and HUD, before the frame is presented). Every frame
+    // renders straight to the canvas at 100%, exactly as in vanilla.
     const VP = { x: 0, y: 0, w: 0, h: 0 }; // the viewport the game's frame currently draws with
-    const PF = { pending: false, seq: -1, inRaf: false, prevTs: -1, dt: 0, t0: 0, s: 1, id: 0 }; // id: game frames started
-    const MIN_W = 640, MIN_H = 360;      // smaller canvases (the .pix menus) render directly
-    const MISS_MS = 17.5;                // a frame slower than this missed 60 Hz
-    const CPU_BOUND_MS = 12;             // rAF callbacks longer than this are CPU-bound: resolution can't help
-    // With the timer, Auto raises the scale only if the GPU time (median) is predicted to stay below the budget, and
-    // lowers it when it is above the high mark. Uncapped, the frame interval is about the GPU time and its 95th
-    // percentile ~3.5-4 ms more (the GPU-time median sits below the mean), so 12.7 keeps it under 16.7 with a margin
-    // (Ultra at scale 1, median ~12.9 ms, read p95gb 15.6-16.8). At a 60 Hz (or slower) cap the UHD 620 clocks down in the
-    // idle gaps and the same frame reads ~1.5 ms longer (LAB2: High 14.4 at scale 1, 13.3 at 0.9), with the whole
-    // 16.7 ms available: the _CAP marks apply when the refresh estimate says the frames are capped.
-    const GPU_BUDGET_MS = 12.0, GPU_HIGH_MS = 12.7;
-    const GPU_BUDGET_CAP_MS = 13.5, GPU_HIGH_CAP_MS = 14.2, CAPPED_MS = 15.5;
-    const GOV_AGE_MS = 30000, GOV_SETTLE = 4, GOV_UNDO_MS = 4000; // how long a scale's measured GPU time counts for
-                                         // predictions; frames after a change whose GPU samples are skipped; a drop
-                                         // this soon after a raise undid it (the next raise waits twice as long)
-    const GOV_PIX = 0.5;                 // prior: share of the scene's GPU time that scales with its pixels (LAB2, rd 12: ~0.35)
-    const COMP_MS = 0.6;                 // prior: scene buffer + composite cost at 1920x1080 (none at scale 1)
-
-    const COMP_VS = `#version 300 es
-precision highp float;
-uniform vec2 uTcScale;
-out vec2 vUV;
-void main() {
-  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  vUV = p * uTcScale;
-  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
-}`;
-    // uTcTexel: xy = 1 / scene texture size, zw = the highest UV inside the rendered rectangle (half a texel in)
-    const COMP_FS = `#version 300 es
-precision highp float;
-uniform highp sampler2D uTcScene;
-uniform vec2 uTcScale;
-uniform vec4 uTcTexel;
-uniform float uTcSharp;
-uniform float uTcCheap;
-in vec2 vUV;
-out vec4 o;
-// Sharpen (LAB-measured on the UHD 620: ~0.85 ms at 1080p vs ~1.6 ms for a 5-tap RGB CAS, same acutance):
-// the centre plus two diagonal half-texel bilinear taps (each a 2x2 box), with a CAS-style adaptive negative
-// lobe from the green channel. uTcSharp = 0 is a single bilinear tap (~0.65 ms, the bandwidth floor).
-// uTcCheap (Auto at its lowest scale, when the GPU is busiest): one tap, bilinear with the sub-texel fraction
-// contrast-boosted (LAB: ~0.6 ms; crisper block edges than plain bilinear, no halo, less texture micro-contrast).
-void main() {
-  vec2 uv = min(vUV, uTcTexel.zw);
-  if (uTcCheap > 0.5 && uTcSharp > 0.001) {
-    vec2 p = uv / uTcTexel.xy - 0.5;
-    vec2 i = floor(p);
-    vec2 f = clamp((p - i - 0.5) * (1.0 + 2.0 * uTcSharp) + 0.5, 0.0, 1.0);
-    o = vec4(textureLod(uTcScene, min((i + 0.5 + f) * uTcTexel.xy, uTcTexel.zw), 0.0).rgb, 1.0);
-    return;
-  }
-  vec3 c = textureLod(uTcScene, uv, 0.0).rgb;
-  if (uTcSharp > 0.001) {
-    vec2 t = uTcTexel.xy * 0.5;
-    vec3 a = textureLod(uTcScene, min(uv + t, uTcTexel.zw), 0.0).rgb;
-    vec3 b = textureLod(uTcScene, uv - t, 0.0).rgb;
-    float mn = min(c.g, min(a.g, b.g)), mx = max(c.g, max(a.g, b.g));
-    float k = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0)) * (-2.0 / mix(8.0, 5.0, uTcSharp));
-    c = clamp((c + (a + b) * k) / (1.0 + 2.0 * k), 0.0, 1.0);
-  }
-  o = vec4(c, 1.0);
-}`;
+    const PF = { pending: false, seq: -1, inRaf: false, prevTs: -1, dt: 0, t0: 0, id: 0 }; // id: game frames started
+    const CPU_BOUND_MS = 12;             // rAF callbacks longer than this mean the frame is CPU-bound (perf.cpuBound)
 
     // GPU time per frame (EXT_disjoint_timer_query_webgl2, TIME_ELAPSED): one query per frame from a ring of
     // TQ_N, read when available (on the UHD 620 / D3D11 that is 0.25-1.5 s later), never blocking; samples are
     // dropped when the GPU reports a disjoint period.
     const TQ_N = 128;
-    const TQ = { ext: null, ok: false, q: [], s: new Float64Array(TQ_N), f: new Int32Array(TQ_N), busy: new Uint8Array(TQ_N), head: 0, tail: 0, active: -1 };
+    const TQ = { ext: null, ok: false, q: [], f: new Int32Array(TQ_N), busy: new Uint8Array(TQ_N), head: 0, tail: 0, active: -1 };
 
     // gpuRing: GPU ms of each timed frame, written at gpuFrame & 255 (gpuFrame = samples so far; NaN = dropped as disjoint)
     // gpuRingFrame: the frame number each sample belongs to; frame: the number of the game frame most recently
     // started (counted at its viewport call; not the same counter as state.frame)
+    // scale: always 1 since 1.5.1 (tools/bench.mjs and older Better Options read it); fpsGame: frames in the last window,
+    // counted as the game's F3 overlay counts them (see gameFps), 0 until the first window closes
     const PERF = {
-        fps: 0, ms: 0, cpuMs: 0, gpuMs: null, scale: 1, cpuBound: false, shadowRefreshPerMin: 0, timer: false,
+        fps: 0, fpsGame: 0, ms: 0, cpuMs: 0, gpuMs: null, scale: 1, cpuBound: false, shadowRefreshPerMin: 0, timer: false,
         gpuRing: new Float32Array(256), gpuRingFrame: new Int32Array(256), gpuFrame: 0, frame: 0
     };
-    const PT = { t: 0, n: 0, dt: 0, cpu: 0, cpuN: 0, gpu: 0, gpuN: 0, rt: new Float64Array(20), rc: new Float64Array(20), ri: 0, rn: 0 };
-    // Auto governor: 10-frame window of frame intervals, each with the callback that preceded it (pc: the last
-    // frame's callback time). Frame cadence (the no-timer miss rule): lo = the 7 shortest intervals of the current
-    // block of 64 (its 10th percentile is lo[6]), cq = that percentile of the last 4 blocks, vs = their minimum
-    // (the display's refresh interval, or the cap; it starts at 60 Hz).
-    // GPU level at the current scale (with the timer): gpu = the median of the last 16 samples taken at it (gr), so
-    // the odd long frame (a JS burst inside the timed span, a shadow redraw) can't drag it over the line. Per-scale
-    // memory on the 0.05 grid from 0.5 (index 0) to 1 (index 10): tg = that median when last measured, tn = samples,
-    // tt = when; raises and drops predict from it (see govPredict).
-    const GOV = {
-        s: 1, iv: new Float64Array(10), cp: new Float64Array(10), i: 0, n: 0, pc: -1,
-        lastChange: -1e9, lastMiss: -1e9, lastRaise: -1e9, backoff: 1, gpu: 0, gpuN: 0, gpuAt: -1e9, drops: 0, raises: 0,
-        lo: new Float64Array(7).fill(1e9), cn: 0, cq: new Float64Array(4).fill(1000 / 60), cqi: 0, vs: 1000 / 60, cv: 0, rf: 1000 / 60,
-        gr: new Float64Array(16), gs: new Float64Array(16), tg: new Float64Array(11), tn: new Int32Array(11),
-        tt: new Float64Array(11).fill(-1e9), px: 1920 * 1080, cf: -1e9, lastReal: -1e9, prevReal: -1e9
-    };
+    const PT = { t: 0, n: 0, dt: 0, cpu: 0, cpuN: 0, gpu: 0, gpuN: 0, gf: 0, gT: -1, rt: new Float64Array(20), rc: new Float64Array(20), ri: 0, rn: 0 };
     // bench recorder (Twitterentary.bench): dt keeps the first 16384 intervals (percentiles); m counts every
-    // interval, for the means (dtSum, scale). Intervals up to 5 s count, so very slow renderers still get a row.
-    const BREC = { on: false, n: 0, m: 0, dt: new Float64Array(16384), dtSum: 0, cpu: 0, cpuN: 0, gpu: 0, gpuN: 0, scale: 0, ref0: 0, t0: 0 };
+    // interval, for the means (dtSum). Intervals up to 5 s count, so very slow renderers still get a row.
+    const BREC = { on: false, n: 0, m: 0, dt: new Float64Array(16384), dtSum: 0, cpu: 0, cpuN: 0, gpu: 0, gpuN: 0, ref0: 0, t0: 0 };
     const BREC_MAX_MS = 5000;
 
-    function initPost(gl) {
-        SC.prog = makeProg(gl, COMP_VS, COMP_FS);
-        const g = n => O.getUniformLocation.call(gl, SC.prog, n);
-        SC.uScale = g('uTcScale'); SC.uTexel = g('uTcTexel'); SC.uSharp = g('uTcSharp'); SC.uCheap = g('uTcCheap');
-        O.useProgram.call(gl, SC.prog);
-        O.uniform1i.call(gl, g('uTcScene'), 8);
-        SC.vao = gl.createVertexArray();
-    }
-    // The GPU timer, independent of the scene buffer (a composite that fails to compile keeps the timing).
     function initTimer(gl) {
         try {
             const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
@@ -1718,66 +1634,8 @@ void main() {
         PERF.timer = TQ.ok;
     }
 
-    // Any scene-buffer error: render directly for the rest of the session. Whenever our FBO exists, the default
-    // framebuffer and the full-canvas viewport are put back (the game itself never binds a framebuffer), also
-    // when the error came after SC.bound was cleared (a composite that threw before its own unbind).
-    function postFail(gl, e) {
-        if (POST.ok) console.error(TAG, 'Render scale is off for this session (rendering directly):', e);
-        POST.ok = false; POST.active = false; PF.s = 1;
-        SC.bound = false;
-        if (SC.fbo !== null && gl) {
-            try {
-                const c = gl.canvas, w = c ? c.width : SC.cw, h = c ? c.height : SC.ch;
-                O.bindFramebuffer.call(gl, gl.FRAMEBUFFER, null);
-                O.viewport.call(gl, 0, 0, w, h);
-                VP.x = 0; VP.y = 0; VP.w = w; VP.h = h;
-            } catch (e2) {}
-        }
-    }
-
-    // The fixed render scale, or 0 for Auto.
-    function scaleSetting() {
-        const v = Number(CFG.renderScale);
-        if (!(v > 0)) return 0;
-        return v >= 1 ? 1 : Math.max(0.5, v);
-    }
-
-    // Runs only when the canvas outgrows the textures (or shrinks to under half of them), not every frame.
-    function allocScene(gl, w, h) {
-        const prevActive = gl.getParameter(gl.ACTIVE_TEXTURE);
-        const fresh = SC.fbo === null;
-        try {
-            if (fresh) { SC.fbo = gl.createFramebuffer(); SC.color = gl.createTexture(); SC.depth = gl.createTexture(); }
-            gl.activeTexture(gl.TEXTURE8);
-            gl.bindTexture(gl.TEXTURE_2D, SC.depth);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, w, h, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
-            if (fresh) texParams(gl, gl.NEAREST);
-            gl.bindTexture(gl.TEXTURE_2D, SC.color); // stays bound on unit 8 for the composite
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-            if (fresh) texParams(gl, gl.LINEAR);
-        } finally {
-            gl.activeTexture(prevActive);
-        }
-        O.bindFramebuffer.call(gl, gl.FRAMEBUFFER, SC.fbo);
-        if (fresh) {
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, SC.color, 0);
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, SC.depth, 0);
-        }
-        const st = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-        O.bindFramebuffer.call(gl, gl.FRAMEBUFFER, null);
-        SC.tw = w; SC.th = h; SC.cx = NaN; SC.checks = 2; SC.allocs++;
-        if (st !== gl.FRAMEBUFFER_COMPLETE) throw new Error('scene framebuffer incomplete (0x' + st.toString(16) + ') at ' + w + 'x' + h);
-    }
-    function texParams(gl, filter) {
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    }
-
-    // The frame's viewport call: time the frame, queue its end, and pick direct rendering or the scene FBO.
-    // Returns true when it has set the (scaled) viewport itself.
-    function frameStart(gl, w, h) {
+    // The frame's viewport call: time the frame and queue its end.
+    function frameStart(gl) {
         const inRaf = RAF.active > 0 && RAF.seq !== PF.seq; // inside a callback that has not started a frame yet
         PF.seq = RAF.seq; PF.inRaf = inRaf;
         const now = performance.now();
@@ -1787,95 +1645,27 @@ void main() {
         PF.t0 = inRaf ? RAF.t0 : now;
         PF.pending = true; PF.id++; PERF.frame = PF.id;
         queueMicrotask(frameEnd);
-
-        const fixed = scaleSetting();
-        const s = fixed > 0 ? fixed : GOV.s;
-        const use = s < 0.999 && CFG.enabled && !ERR.off && POST.ok && SC.prog !== null && w >= MIN_W && h >= MIN_H;
-        PF.s = use ? s : 1;
-        GOV.px = w * h;
-        POST.active = use;
         if (TQ.ok) timerBegin(gl);
-        if (!use) { POST.w = w; POST.h = h; return false; }
-        if (w > SC.tw || h > SC.th || w * h * 2 < SC.tw * SC.th) allocScene(gl, w, h);
-        const sw = Math.ceil(w * s), sh = Math.ceil(h * s);
-        O.bindFramebuffer.call(gl, gl.FRAMEBUFFER, SC.fbo);
-        SC.bound = true; SC.sw = sw; SC.sh = sh; SC.cw = w; SC.ch = h;
-        O.viewport.call(gl, 0, 0, sw, sh);
-        VP.x = 0; VP.y = 0; VP.w = sw; VP.h = sh;
-        POST.w = sw; POST.h = sh;
-        return true;
     }
 
-    // Microtask, after the game's whole rAF callback: composite, then timing and the Auto governor.
+    // Microtask, after the game's whole rAF callback: ends the GPU timer and publishes the frame's timing.
     function frameEnd() {
         PF.pending = false;
         const gl = mainGL;
-        if (SC.bound) {
-            SC.bound = false;
-            try { composite(gl); } catch (e) { postFail(gl, e); }
-        }
         try {
             if (TQ.active >= 0) { TQ.active = -1; gl.endQuery(TQ.ext.TIME_ELAPSED_EXT); }
             const t1 = performance.now();
             const cpu = PF.inRaf ? t1 - PF.t0 : -1;
             if (TQ.ok) timerPoll(gl);
-            govern(PF.dt, cpu, t1);
             perfFrame(PF.dt, cpu, t1);
         } catch (e) { hookError('frame timing', e); }
-    }
-
-    // Draws the scene texture to the canvas, then puts back exactly what it changed: program, VAO, the four
-    // capabilities (read with isEnabled, which Chrome answers from its client-side cache), framebuffer and
-    // viewport (back to the full canvas, as in vanilla). The scene texture stays bound on unit 8, so the
-    // active texture unit is never touched.
-    function composite(gl) {
-        const wasDepth = gl.isEnabled(gl.DEPTH_TEST), wasCull = gl.isEnabled(gl.CULL_FACE);
-        const wasBlend = gl.isEnabled(gl.BLEND), wasScissor = gl.isEnabled(gl.SCISSOR_TEST);
-        const check = SC.checks > 0;
-        if (check) gl.getError(); // once after each allocation: clear, then test our own calls below
-        try {
-            O.bindFramebuffer.call(gl, gl.FRAMEBUFFER, null);
-            O.viewport.call(gl, 0, 0, SC.cw, SC.ch);
-            VP.x = 0; VP.y = 0; VP.w = SC.cw; VP.h = SC.ch;
-            if (wasDepth) gl.disable(gl.DEPTH_TEST);
-            if (wasCull) gl.disable(gl.CULL_FACE);
-            if (wasBlend) gl.disable(gl.BLEND);
-            if (wasScissor) gl.disable(gl.SCISSOR_TEST);
-            O.useProgram.call(gl, SC.prog);
-            const ux = SC.sw / SC.tw, uy = SC.sh / SC.th;
-            if (ux !== SC.cx || uy !== SC.cy) {
-                SC.cx = ux; SC.cy = uy;
-                O.uniform2f.call(gl, SC.uScale, ux, uy);
-                O.uniform4f.call(gl, SC.uTexel, 1 / SC.tw, 1 / SC.th, (SC.sw - 0.5) / SC.tw, (SC.sh - 0.5) / SC.th);
-            }
-            const sh = clamp01(num(CFG.sharpen));
-            if (sh !== SC.cSharp) { SC.cSharp = sh; O.uniform1f.call(gl, SC.uSharp, sh); }
-            // Auto sitting at its lowest scale: the 1-tap sharpen
-            const cheap = scaleSetting() === 0 && GOV.s <= Math.max(0.5, cfgNum('renderScaleMin')) + 1e-6 ? 1 : 0;
-            if (cheap !== SC.cCheap) { SC.cCheap = cheap; O.uniform1f.call(gl, SC.uCheap, cheap); }
-            O.bindVertexArray.call(gl, SC.vao);
-            O.drawArrays.call(gl, gl.TRIANGLES, 0, 3);
-        } finally {
-            O.bindVertexArray.call(gl, curVAO);
-            O.useProgram.call(gl, curProg);
-            if (wasDepth) gl.enable(gl.DEPTH_TEST);
-            if (wasCull) gl.enable(gl.CULL_FACE);
-            if (wasBlend) gl.enable(gl.BLEND);
-            if (wasScissor) gl.enable(gl.SCISSOR_TEST);
-        }
-        POST.composites++; POST.frame = frameId;
-        if (check) {
-            SC.checks--;
-            const err = gl.getError();
-            if (err !== 0 && err !== gl.CONTEXT_LOST_WEBGL) throw new Error('GL error 0x' + err.toString(16) + ' in the composite');
-        }
     }
 
     function timerBegin(gl) {
         const i = TQ.head;
         if (TQ.busy[i] || TQ.active >= 0) return; // the whole ring still in flight: skip this frame
         gl.beginQuery(TQ.ext.TIME_ELAPSED_EXT, TQ.q[i]);
-        TQ.busy[i] = 1; TQ.s[i] = PF.s; TQ.f[i] = PF.id; TQ.active = i; TQ.head = (i + 1) % TQ_N;
+        TQ.busy[i] = 1; TQ.f[i] = PF.id; TQ.active = i; TQ.head = (i + 1) % TQ_N;
     }
     function timerPoll(gl) {
         for (let k = 0; k < 32; k++) {
@@ -1889,246 +1679,25 @@ void main() {
             PT.gpu += ms; PT.gpuN++;
             PERF.gpuRingFrame[PERF.gpuFrame & 255] = TQ.f[i]; PERF.gpuRing[PERF.gpuFrame & 255] = ms; PERF.gpuFrame++;
             if (BREC.on) { BREC.gpu += ms; BREC.gpuN++; }
-            // only samples of the scale the governor holds (not direct frames while K is off, after errors or on a
-            // small canvas, which would file vanilla-cost samples under GOV.s), and not the first GOV_SETTLE frames
-            // after a change (the scene buffer turning on or off, a GPU clock still settling: SH5 saw them read
-            // 1-2 ms high under vsync, and the drops they caused undid raises half a second later)
-            if (TQ.s[i] === PF.s && TQ.f[i] > GOV.cf + GOV_SETTLE && CFG.enabled && !ERR.off && (PF.s === GOV.s || PF.s === 1 && GOV.s >= 0.999)) govSample(ms, performance.now());
         }
     }
-    // A GPU sample taken at the current scale: the median of the last 16 (insertion sort into a scratch array).
-    function govSample(ms, now) {
-        const g = GOV, n = g.gpuN < 16 ? g.gpuN + 1 : 16;
-        g.gr[g.gpuN & 15] = ms; g.gpuN++; g.gpuAt = now;
-        const a = g.gs;
-        for (let k = 0; k < n; k++) {
-            const v = g.gr[k];
-            let j = k;
-            while (j > 0 && a[j - 1] > v) { a[j] = a[j - 1]; j--; }
-            a[j] = v;
-        }
-        g.gpu = n & 1 ? a[n >> 1] : (a[(n >> 1) - 1] + a[n >> 1]) * 0.5;
-        if (g.gpuN >= 5) { const k = govIdx(g.s); g.tg[k] = g.gpu; g.tn[k] = g.gpuN; g.tt[k] = now; }
-    }
-    const govIdx = s => Math.min(10, Math.max(0, Math.round((s - 0.5) * 20)));
-    // Predicted GPU ms at scale u: measured there in the last GOV_AGE_MS (5+ samples), else a + b*u^2 through the
-    // current scale's level, with b from the measured scale farthest from it, or the prior GOV_PIX share. Scale 1
-    // renders directly: the scene buffer and composite (COMP_MS at 1080p, by canvas pixels) only below it. A measured
-    // scale counts only while it is consistent with the current one (GPU time rises with the scale, at most as fast as
-    // the pixel count, +-0.75 ms): one measured in other conditions (the first frames of a new preset, another view)
-    // would otherwise hold the scale down, or up.
-    function govPredict(u, now) {
-        const g = GOV, ku = govIdx(u);
-        const comp = COMP_MS * g.px / (1920 * 1080);
-        const s0 = g.s, k0 = govIdx(s0), q0 = s0 * s0, gc0 = g.gpu + (k0 === 10 ? comp : 0);
-        const bmax = gc0 / q0;
-        if (govFits(ku, now, comp, q0, gc0, bmax)) return g.tg[ku];
-        let b = GOV_PIX * bmax, best = 0.05;
-        for (let j = 0; j <= 10; j++) {
-            if (j === k0 || !govFits(j, now, comp, q0, gc0, bmax)) continue;
-            const sj = 0.5 + j * 0.05, d = Math.abs(sj * sj - q0);
-            if (d >= best) { best = d; b = (gc0 - g.tg[j] - (j === 10 ? comp : 0)) / (q0 - sj * sj); }
-        }
-        b = Math.min(bmax, Math.max(0, b));
-        return gc0 + b * (u * u - q0) - (ku === 10 ? comp : 0);
-    }
-    function govFits(j, now, comp, q0, gc0, bmax) {
-        const g = GOV;
-        if (g.tn[j] < 5 || now - g.tt[j] >= GOV_AGE_MS) return false;
-        const sj = 0.5 + j * 0.05, gj = g.tg[j] + (j === 10 ? comp : 0), dq = sj * sj - q0;
-        return dq >= 0 ? gj >= gc0 - 0.75 && gj <= gc0 + bmax * dq + 0.75 : gj <= gc0 + 0.75 && gj >= gc0 + bmax * dq - 0.75;
-    }
-
-    function setScale(s, now, up) {
-        GOV.s = Math.round(s * 100) / 100;
-        GOV.lastChange = now; GOV.n = 0; GOV.i = 0; GOV.gpu = 0; GOV.gpuN = 0; GOV.cf = PF.id;
-        if (up) { GOV.lastRaise = now; GOV.raises++; } else GOV.drops++;
-    }
-    // capped blind drop from s to v: false when a fresh measurement shows it saves nothing (v no 0.3 ms cheaper than
-    // now, or the scale above, where it came from, no 0.3 ms costlier). Real misses mean no clock-down slack, so
-    // those measurements are honest
-    function govFresh(k, now) { return GOV.tn[k] >= 5 && now - GOV.tt[k] < GOV_AGE_MS; }
-    function govHelps(v, s, now, skip) {
-        const g = GOV, kv = govIdx(v);
-        if (govFresh(kv, now) && g.tg[kv] > g.gpu - 0.3) return false;
-        if (s < 1) {
-            let a = Math.min(1, Math.round((s + 0.05) * 20) / 20);
-            if (skip && a > 0.94) a = 1;
-            const ka = govIdx(a);
-            if (govFresh(ka, now) && g.tg[ka] - g.gpu < 0.3) return false;
-        }
-        return true;
-    }
-    function govReset() {
-        GOV.s = 1; GOV.n = 0; GOV.i = 0; GOV.pc = -1; GOV.gpu = 0; GOV.gpuN = 0; GOV.backoff = 1; GOV.cf = PF.id;
-        GOV.lastChange = -1e9; GOV.lastMiss = -1e9; GOV.lastRaise = -1e9; GOV.lastReal = -1e9; GOV.prevReal = -1e9;
-        GOV.tn.fill(0); GOV.tt.fill(-1e9);
-    }
-
-    // Auto. With the GPU timer (Chrome on D3D11 has it) it keeps the frame's GPU time (the median of the samples
-    // taken at the current scale; results arrive late, so it waits for 5 of them after each change) under
-    // the high mark (GPU_HIGH_MS uncapped, GPU_HIGH_CAP_MS when the frames are capped at 60 Hz or slower): above it,
-    // it drops to the highest scale (up to 0.25 lower) predicted to be under the budget (GPU_BUDGET_MS / _CAP_MS),
-    // else one step if that is predicted to save time, else it stays (the frame isn't limited by its pixels); it
-    // raises 5% (from 0.85 or more straight to 1, which skips the composite) when the GPU time there is predicted to
-    // stay under the budget, or was measured no higher than now. Predictions come from what each scale measured
-    // in the last GOV_AGE_MS, else a fit (govPredict), so a frame bound by its draws, not its pixels, keeps a high
-    // scale. Without the timer it reacts to missed frames: 3 of the last 10 frames over 17.5 ms (over 1.05 measured
-    // refresh intervals when the display or Chrome caps below 60 Hz, e.g. 35 ms at 30 Hz) drop 5% (10% when most
-    // miss); raises probe, and a raise undone within 3 s doubles the wait (with the timer: within GOV_UNDO_MS).
-    // Raises need 2 s without trouble; at most one change per 0.5 s, within [renderScaleMin, 1]. Auto skips 0.95
-    // (unless renderScaleMin is above 0.9): there the scene buffer and composite cost what the pixels save (it
-    // measured the same as 1.0 in every LAB2/SH5 run), so it was only a step to hunt on.
-    // CPU-bound frames (rAF callback > 12 ms: meshing, the game's JS bursts) never lower the scale, and with
-    // the timer, misses only count while the GPU itself is measured over its budget.
-    function govern(dt, cpu, now) {
-        const g = GOV, pc = g.pc;
-        g.pc = cpu;
-        if (!(dt > 0 && dt < 250)) return;
-        // dt ends at this frame's start, so it follows the PREVIOUS frame's callback (pc): after one of the game's
-        // long JS callbacks the next frame starts late however light the GPU is
-        const i = g.i;
-        g.iv[i] = dt; g.cp[i] = pc; g.i = i === 9 ? 0 : i + 1;
-        if (g.n < 10) g.n++;
-        // frame cadence: a 30 Hz cap (Chrome's Energy Saver, a 30 Hz screen) or a 50 Hz screen lifts vs above 16.7 ms
-        // after 4 blocks (~8.5 s at 30 Hz); at 60 Hz, faster screens or uncapped it stays at or below 16.7
-        const lo = g.lo;
-        if (dt < lo[6]) { let j = 6; while (j > 0 && lo[j - 1] > dt) { lo[j] = lo[j - 1]; j--; } lo[j] = dt; }
-        if (++g.cn >= 64) {
-            g.cq[g.cqi] = lo[6]; g.cqi = (g.cqi + 1) & 3; g.cn = 0; lo.fill(1e9);
-            g.vs = Math.min(g.cq[0], g.cq[1], g.cq[2], g.cq[3]);
-            // cv: the median of the 4 blocks (a block shortened by catch-up frames, which LAB2 saw read 3-8 ms at a
-            // 60 Hz cap, doesn't move the GPU marks)
-            const q = g.cq, lo2 = Math.min(Math.max(q[0], q[1]), Math.max(q[2], q[3])), hi2 = Math.max(Math.min(q[0], q[1]), Math.min(q[2], q[3]));
-            g.cv = Math.min(50, (lo2 + hi2) / 2);
-        }
-        const timed = TQ.ok && g.gpuN >= 5 && now - g.gpuAt < 2000;
-        // rf: the frame cadence the GPU marks follow. It follows a faster block at once, a slower one only while the
-        // GPU needs under half of it (a real 30 Hz cap, not frames doubled by a GPU that no longer fits one refresh,
-        // which would otherwise raise the marks with the frame time it causes)
-        if (g.cv > 0) {
-            if (g.cv < g.rf || (timed && g.gpu < 0.5 * g.cv)) g.rf = g.cv;
-            g.cv = 0;
-        }
-        // the GPU marks: uncapped, or capped at 60 Hz or slower, where they scale with the cadence (a 30 Hz cap has
-        // twice the time)
-        const capped = g.rf >= CAPPED_MS;
-        const hi = capped ? Math.max(GPU_HIGH_CAP_MS, g.rf * (GPU_HIGH_CAP_MS / (1000 / 60))) : GPU_HIGH_MS;
-        const bud = capped ? Math.max(GPU_BUDGET_CAP_MS, g.rf * (GPU_BUDGET_CAP_MS / (1000 / 60))) : GPU_BUDGET_MS;
-        // a missed frame: with fresh GPU samples, over 17.5 ms (60 Hz); otherwise over 1.05 refresh intervals, at
-        // least 17.5 ms (so a 60 Hz, faster or uncapped display still aims at 60, a 30 Hz cap at 30)
-        const missMs = timed ? MISS_MS : Math.max(MISS_MS, 1.05 * g.vs);
-        // without fresh GPU samples misses count only if there is no timer or it stopped resolving (the fallback
-        // below), not while the samples for a new scale are still on their way
-        const gpuBusy = timed ? g.gpu > bud : (!TQ.ok || (now - g.gpuAt >= 5000 && now - g.lastChange >= 5000));
-        if (dt > missMs && pc < CPU_BOUND_MS && gpuBusy) g.lastMiss = now;
-        // a frame that really missed its refresh (the cadence the marks follow: 35 ms at a 30 Hz cap), whatever the GPU
-        if (dt > Math.max(MISS_MS, 1.05 * g.rf) && pc < CPU_BOUND_MS) { g.prevReal = g.lastReal; g.lastReal = now; }
-        if (scaleSetting() > 0 || !CFG.enabled || !POST.ok || PF.s === 1 && !postPossible()) return;
-        const min = Math.min(1, Math.max(0.5, cfgNum('renderScaleMin')));
-        if (g.s < min - 1e-6) { setScale(min, now, true); return; }
-        const skip = min <= 0.9 + 1e-6; // no 0.95 step (see above)
-        if (g.n < 10 || now - g.lastChange < 500) return;
-        // with a timer, wait for GPU samples taken at the current scale (they arrive up to ~1.5 s late); if none
-        // came for 5 s (the timer stopped resolving), fall back to the frame-miss rules
-        if (TQ.ok && !timed && (now - g.gpuAt < 5000 || now - g.lastChange < 5000)) return;
-        let misses = 0, sum = 0;
-        for (let k = 0; k < 10; k++) { const d = g.iv[k]; sum += d; if (d > missMs && g.cp[k] < CPU_BOUND_MS) misses++; }
-        // a drop needs the median of 8+ samples (single slow windows are common: external GPU spikes), a full window
-        // of 16 right after a raise (with 8 the median read 1-2 ms high often enough to undo most raises under
-        // vsync, SH5)
-        // ... and 0.2 ms more to leave scale 1, the cheapest per pixel (no composite): just below it the scene buffer
-        // can cost as much as the pixels save (LAB2: 0.95 read the same as 1.0 at rd 12)
-        // Capped, it also needs two frames that really missed in the last 2 s, and it goes at most 0.1 down: with slack
-        // the GPU clocks down until the frame nearly fills it (SH5 under 60 Hz vsync: High at 1.0 read 12.7-14.8 ms
-        // for the same work and missed none), so the GPU time over-reads the load, and so do the predictions from it
-        // (Auto drifted down to 0.6-0.85 for nothing)
-        // (16 also for the first drop after load or a reset, where lastRaise = lastChange = -1e9: govsim's start-up
-        // transient case did better with it). Both real misses must fall at the current scale, so one pair can't
-        // justify two drops in a row
-        if (timed && g.gpuN >= (g.lastRaise === g.lastChange ? 16 : 8) && g.gpu > hi + (g.s >= 1 ? 0.2 : 0) &&
-            (!capped || now - g.prevReal < 2000 && g.prevReal > g.lastChange)) {
-            g.lastMiss = now;
-            // the highest scale (at most 0.25 lower) predicted under the budget; else one step if it is predicted to
-            // save time; else stay: lower scales measured no cheaper (bound by draws or the CPU, not pixels)
-            let u = -1;
-            for (let k = 1; k <= (capped ? 2 : 5); k++) {
-                const v = Math.round((g.s - 0.05 * k) * 20) / 20;
-                if (v < min - 1e-6) break;
-                if (skip && v > 0.94) continue;
-                if (govPredict(v, now) <= bud) { u = v; break; }
-            }
-            if (u < 0) {
-                let v = Math.max(min, Math.round((g.s - 0.05) * 20) / 20);
-                if (skip && v > 0.94) v = 0.9;
-                // capped, it really missed: drop one step blind, unless measurements say it won't help (the step down
-                // measured no cheaper, or the last step down saved nothing): a frame bound by its draws keeps its scale
-                if (v < g.s - 1e-6 && (capped ? govHelps(v, g.s, now, skip) : govPredict(v, now) < g.gpu - 0.3)) u = v;
-            }
-            if (u > 0) {
-                if (now - g.lastRaise < GOV_UNDO_MS) g.backoff = Math.min(8, g.backoff * 2); // it undid a raise
-                setScale(u, now, false); return;
-            }
-            // staying: a higher scale measured no costlier than this one is as good
-            let up = Math.min(1, Math.round((g.s + 0.05) * 20) / 20);
-            if (skip && up > 0.94) up = 1;
-            const ku = govIdx(up);
-            // (capped: no costlier at all, a 0.3 ms dead band against govHelps' blind drop, else they could take turns)
-            if (up > g.s + 1e-6 && g.tn[ku] >= 5 && now - g.tt[ku] < GOV_AGE_MS && g.tg[ku] <= g.gpu + (capped ? 0 : 0.25)) setScale(up, now, true);
-            return;
-        }
-        if (timed ? misses >= 5 && gpuBusy : misses >= 3) {
-            if (g.s > min + 1e-6) {
-                if (now - g.lastRaise < (timed ? GOV_UNDO_MS : 3000)) g.backoff = Math.min(8, g.backoff * 2);
-                let v = Math.max(min, Math.floor((g.s - (misses >= 6 ? 0.1 : 0.05)) * 20 + 1e-6) / 20);
-                if (skip && v > 0.94) v = 0.9;
-                setScale(v, now, false);
-            }
-            return;
-        }
-        if (now - g.lastMiss > 30000) g.backoff = 1;
-        if (g.s >= 1 || now - g.lastMiss < 2000 * g.backoff) return;
-        let up = Math.min(1, Math.round((g.s + 0.05) * 20) / 20);
-        if (skip && up > 0.94) up = 1;
-        const mean = sum / 10;
-        if (timed) {
-            const ku = govIdx(up), known = g.tn[ku] >= 5 && now - g.tt[ku] < GOV_AGE_MS;
-            const p = govPredict(up, now);
-            // two steps at once when both are predicted well under the budget (back up quickly after a transient)
-            // (onto 1 this way only without the 0.95 step, where 0.85 -> 1 is two steps)
-            let up2 = Math.min(1, Math.round((g.s + 0.1) * 20) / 20);
-            if (skip && up2 > 0.94) up2 = 1;
-            if (up2 > up && (up2 < 1 || skip) && p < bud - 0.5 && govPredict(up2, now) < bud - 0.5) setScale(up2, now, true);
-            else if (p < bud || (known && p <= g.gpu + 0.25)) setScale(up, now, true);
-            else if (g.s >= 0.85 - 1e-6 && up < 1 && govPredict(1, now) < bud) setScale(1, now, true);
-            return;
-        }
-        const k2 = (up / g.s) * (up / g.s);
-        let ok;
-        if (mean < 15) ok = mean * k2 < 15.5; // uncapped: the interval itself shows the headroom
-        else ok = true;                        // vsync-locked without a timer: probe, backing off on failure
-        if (ok) setScale(up, now, true);
-    }
-
-    // debug(): { '0.85': GPU ms } for the scales measured in the last GOV_AGE_MS
-    function govTable() {
-        const o = {}, now = performance.now();
-        for (let k = 0; k <= 10; k++) if (GOV.tn[k] >= 5 && now - GOV.tt[k] < GOV_AGE_MS) o[(0.5 + k * 0.05).toFixed(2)] = +GOV.tg[k].toFixed(2);
-        return o;
-    }
-
-    // Could this frame use the scene FBO at all (canvas size, setup)? Auto idles while it can't.
-    function postPossible() {
-        return SC.prog !== null && VP.w >= MIN_W && VP.h >= MIN_H;
+    // The game's own FPS counter (main.js frameBody, what F3 shows): frames per window on the rAF timestamp, the window
+    // closing on the first frame past 1000 ms. Its window can't be read, so the two can still be a frame apart.
+    function gameFps(ts) {
+        const p = PT;
+        if (p.gT < 0) { p.gT = ts; return; }
+        p.gf++;
+        if (ts - p.gT > 1000) { PERF.fpsGame = p.gf; p.gf = 0; p.gT = ts; }
     }
 
     function perfFrame(dt, cpu, now) {
         const p = PT;
+        if (PF.inRaf) gameFps(PF.prevTs);
         if (dt > 0 && dt < 1000) { p.n++; p.dt += dt; }
         if (cpu >= 0) { p.cpu += cpu; p.cpuN++; }
         if (BREC.on && dt > 0 && dt < BREC_MAX_MS) {
             if (BREC.n < BREC.dt.length) BREC.dt[BREC.n++] = dt;
-            BREC.m++; BREC.dtSum += dt; BREC.scale += PF.s;
+            BREC.m++; BREC.dtSum += dt;
             if (cpu >= 0) { BREC.cpu += cpu; BREC.cpuN++; }
         }
         if (p.t === 0) { p.t = now; return; }
@@ -2136,14 +1705,13 @@ void main() {
         if (el < 250) return;
         if (TQ.ok && p.gpuN && mainGL.getParameter(TQ.ext.GPU_DISJOINT_EXT)) { // 4x/s; Chrome answers this client-side (no GPU sync)
             for (let k = 1; k <= p.gpuN && k <= 256; k++) PERF.gpuRing[(PERF.gpuFrame - k) & 255] = NaN;
-            p.gpu = 0; p.gpuN = 0; GOV.gpu = 0; GOV.gpuN = 0;
+            p.gpu = 0; p.gpuN = 0;
         }
         // a window without a usable interval (a hitch > 1 s) keeps the previous values instead of reading 0
         if (p.n) { PERF.fps = 1000 * p.n / p.dt; PERF.ms = p.dt / p.n; }
         if (p.cpuN) PERF.cpuMs = p.cpu / p.cpuN;
         if (p.gpuN) PERF.gpuMs = p.gpu / p.gpuN;
         else if (!TQ.ok) PERF.gpuMs = null;
-        PERF.scale = PF.s;
         PERF.cpuBound = PERF.cpuMs > CPU_BOUND_MS;
         PERF.timer = TQ.ok;
         // shadow refreshes per minute over the last ~5 s
@@ -2158,18 +1726,12 @@ void main() {
 
     proto.viewport = function (x, y, w, h) {
         if (this === mainGL) {
-            if (x === 0 && y === 0) {
-                if (!PF.pending) {
-                    // the first full-canvas viewport since the last frame ended: gfx.draw's frame start
-                    const c = this.canvas;
-                    if (w === c.width && h === c.height) {
-                        let mine = false;
-                        try { mine = frameStart(this, w, h); } catch (e) { postFail(this, e); }
-                        if (mine) return;
-                    }
-                } else if (SC.bound && w === SC.cw && h === SC.ch) {
-                    O.viewport.call(this, 0, 0, SC.sw, SC.sh);
-                    return;
+            // the first full-canvas viewport since the last frame ended: gfx.draw's frame start
+            if (x === 0 && y === 0 && !PF.pending) {
+                const c = this.canvas;
+                if (w === c.width && h === c.height) {
+                    // a failing beginQuery (the only call here that can throw) costs the GPU timer, nothing else
+                    try { frameStart(this); } catch (e) { TQ.ok = false; }
                 }
             }
             VP.x = x; VP.y = y; VP.w = w; VP.h = h;
@@ -2251,7 +1813,7 @@ void main() {
         const gpuMs = BREC.gpuN >= Math.max(10, m * 0.5) ? BREC.gpu / BREC.gpuN : null;
         const row = {
             name, fps: r3(1000 / ms), ms: r3(ms), p95: r3(q(0.95)), low1: r3(1000 / (worst.reduce((a, b) => a + b, 0) / worst.length)),
-            cpuMs: r3(cpuMs), gpuMs: r3(gpuMs), scale: r3(BREC.scale / m),
+            cpuMs: r3(cpuMs), gpuMs: r3(gpuMs), scale: 1,
             refreshPerMin: r3(wallMs > 0 ? (STATS.refreshes - BREC.ref0) * 60000 / wallMs : null)
         };
         if (cpuMs !== null && cpuMs > CPU_BOUND_MS) row.note = 'cpu-bound';
@@ -2290,7 +1852,7 @@ void main() {
                 for (const k in DEFAULTS) CFG[k] = snapCfg[k];
                 lsRestore(snapLs);
                 stressSet(snapEvery, snapSpeed);
-                govReset(); try { formatSaved = localStorage.getItem(FORMAT_KEY) !== null; } catch (e) {} // lsRestore may have removed the marker
+                try { formatSaved = localStorage.getItem(FORMAT_KEY) !== null; } catch (e) {} // lsRestore may have removed the marker
             };
             for (const name of o.scenarios) {
                 if (ctl.aborted) break;
@@ -2299,10 +1861,9 @@ void main() {
                 for (const k in DEFAULTS) CFG[k] = snapCfg[k];
                 Object.assign(CFG, sc.vals);
                 stressSet(sc.motion && sc.motion.shadowRefreshEvery, sc.motion && sc.motion.moveSpeed);
-                govReset();
                 await benchWait(ctl, (o.warmup + BENCH_SETTLE) * 1000);
                 if (ctl.aborted) break;
-                BREC.n = 0; BREC.m = 0; BREC.dtSum = 0; BREC.cpu = 0; BREC.cpuN = 0; BREC.gpu = 0; BREC.gpuN = 0; BREC.scale = 0;
+                BREC.n = 0; BREC.m = 0; BREC.dtSum = 0; BREC.cpu = 0; BREC.cpuN = 0; BREC.gpu = 0; BREC.gpuN = 0;
                 BREC.ref0 = STATS.refreshes; BREC.t0 = performance.now(); BREC.on = true;
                 await benchWait(ctl, o.seconds * 1000);
                 // very slow renderers (software GL): extend the window until a few frames were seen, at most 5 s
@@ -2435,13 +1996,12 @@ void main() {
                 far: G.sh.valid ? { size: G.sh.size, range: G.sh.E } : null, ...STATS.tiles
             },
             records: rec.size, remeshes: remeshCount, errors: ERR.n, paused: ERR.off,
-            post: Object.assign({ texture: [SC.tw, SC.th], allocs: SC.allocs }, POST),
             perf: Object.assign({}, PERF),
-            governor: { scale: GOV.s, mode: scaleSetting() > 0 ? 'fixed' : 'auto', backoff: GOV.backoff, drops: GOV.drops, raises: GOV.raises, gpuMs: +GOV.gpu.toFixed(2), refreshMs: +GOV.vs.toFixed(2),
-                measured: govTable() },
             stress: stressInfo(),
             preset: { quality: currentPreset('quality'), look: currentPreset('look') },
-            layers: ATL.n, animated: ATL.anim.size, names: ATL.names ? ATL.names.reduce((a, n, i) => { const c = layerClass(i); if (c) (a[['', 'leaves', 'plants', 'water', 'emissive'][c]] ||= []).push(n); return a; }, {}) : null, classes: { leaves: CLS_COUNTS[1], plants: CLS_COUNTS[2], water: CLS_COUNTS[3], emissive: CLS_COUNTS[4] }
+            layers: ATL.n, layerBits, layerNames: ATL.names ? ATL.names.slice() : null,
+            layerClasses: ATL.stats ? Array.from({ length: ATL.n }, (_, l) => layerClass(l)) : null,
+            animated: ATL.anim.size, names: ATL.names ? ATL.names.reduce((a, n, i) => { const c = layerClass(i); if (c) (a[['', 'leaves', 'plants', 'water', 'emissive'][c]] ||= []).push(n); return a; }, {}) : null, classes: { leaves: CLS_COUNTS[1], plants: CLS_COUNTS[2], water: CLS_COUNTS[3], emissive: CLS_COUNTS[4] }
         };
         console.log(out);
         return out;

@@ -1,6 +1,6 @@
 # Machine profile: the bench laptop
 
-Measured on Intel i7-8650U / UHD 620 (ANGLE D3D11, Chrome 156, Windows 11); data up to 2026-11-03 17:05 UTC; regenerate with the steps in §Regenerate (§9).
+Measured on Intel i7-8650U / UHD 620 (ANGLE D3D11, Chrome 156, Windows 11); data up to 2026-11-04 14:40 UTC; regenerate with the steps in §Regenerate (§9).
 
 The numbers come from `reports/bench-*.json`, and every one names its report. `tools/lib/machine-profile.json` holds the
 same numbers as data, for `bench --protocol` and `--preflight`. Read this before you benchmark: it tells you which
@@ -53,7 +53,7 @@ Spread between passes of the same row in the same run (from `runs[]`, rd-12 repo
   reports over 2.5 h; ultra@rd=8 read 10.5-10.8 / 10.79-11.24 in 3.
 - **p95gb is the worst metric.** The same row ranged 4.5 ms across reports (high@rd=8: 12.7-17.2). p95gb2 removes most
   of that: ultra@rd=8 p95gb 18.5 became p95gb2 12.3.
-- **Auto rows carry governor noise.** The median moves 0.6-0.7 ms when the governor lands at 1.0 instead of 0.9. The
+- **Auto rows carried governor noise (1.5.0 reports only; Auto is gone since 1.5.1).** The median moves 0.6-0.7 ms when the governor lands at 1.0 instead of 0.9. The
   1-pass `bench-sh5-v7` medium read 12.1 / p95gb2 16.86 at scale 1.00; three passes (`bench-sh5-medium`) read 11.5 /
   15.10 at 0.89.
 - **The same build, 1 pass vs 3:** `bench-sh4-final2` and `bench-final-1.5` (v-final2). The Auto rows' p95gb differed
@@ -134,24 +134,24 @@ as the 0.9 ms noise in §2.
 
 - **Where the cost is.** Effects and the shadow lookup are per-pixel: they are flat between rd 8 and rd 12. The old
   `off` tax was per-primitive and grew with rd.
-- **Render scale is the only big lever** among the settings. Every individual knob except shadows on/off and
-  shadowSize=4096 is inside single-pass noise.
+- **No big lever is left among the settings.** Render scale was the only one, and 1.5.1 removed it: the user wants
+  100% only. Every other knob except shadows on/off and shadowSize=4096 is inside single-pass noise.
 - **Wide FOV is not the worst case for the script.** On the title view, FOV 110 shows more sky and fewer terrain
   pixels, so ultra at scale 1 is cheaper there than at FOV 80. FOV 70 costs more.
 
 ## §5 Presets at the standard (latest known)
 
-Current working copy (Shaders 1.5.0-wip, SH5 v-final, uncapped). The Auto rows are from `bench-sh5-v7` (1 pass)
-unless a row says otherwise:
+Shaders 1.5.1, always scale 1, game build 6b3963e444, uncapped (`bench-final-1.5.1`). Title-screen numbers only:
+they don't transfer to a real world.
 
-| preset | med | p95gb2 | gpuMs | scale | holds 60 | note |
-|---|---|---|---|---|---|---|
-| low | 10.4 | 13.73 | 11.07 | 1.00 | yes | settled (margin 3.0) |
-| medium | 11.5 | 15.10 | 12.11 | 0.89 | yes | 3 passes (`sh5-medium`); 1 pass at scale 1.00 failed (16.86) |
-| high | 11.0 | 14.45 | 11.49 | 0.85 | yes | settled (margin 2.25) |
-| ultra | 12.0 | 15.30 | 12.51 | 0.94 | yes | margin 1.4: needs passes 2-3 |
-| high-moving | 11.0 | 15.97 | 11.94 | 0.85 | yes | margin 0.7 |
-| ultra-moving | 11.2 | 14.70 | 11.99 | 0.85 | yes | margin 2.0 |
+| preset | med | p95gb2 | gpuMs | passes | holds 60 |
+|---|---|---|---|---|---|
+| low | 9.7 | 12.70 | 9.82 | 1 | yes |
+| medium | 11.7 | 14.52 | 11.56 | 1 | yes |
+| high | 12.1 | 15.10 | 12.00 | 3 | yes |
+| ultra | 12.3 | 15.80 | 12.62 | 3 | yes |
+| high-moving | 12.2 | 15.17 | 12.18 | 3 | yes |
+| ultra-moving | 12.4 | 15.24 | 12.26 | 3 | yes |
 
 - **Native scale 1** (`bench-final-1.5-native`, 3 passes, med / p95gb / gpu): low 10.7 / 15.95 / 11.37, medium 12.3 /
   19.68 / 13.51, high 12.9 / 19.44 / 14.04, ultra 12.6 / 19.78 / 13.61. Holds 60 is **unknown**: no p95gb2 was
@@ -162,14 +162,10 @@ unless a row says otherwise:
   - high@fov=70 11.6 / 14.4, ultra@fov=70 10.5 / 14.6;
   - high@fov=110 11.5 / 16.4, which is 0.3 from the line.
   - ultra@fov=110: no data (the row errored).
-- **Under vsync.** No bench `--vsync` run of the current build exists. SH5's 40-s traces of v7 (handover-SH5 §2, not a
-  bench report), as miss% / mean scale / changes per minute:
-  - high 0.17 / 0.994 / 3;
-  - ultra 0.17 / 0.994 / 3;
-  - high-moving 0.00 / 1.0 / 0;
-  - ultra-moving 0.59 / 0.985 / 6.
-  - All hold. `bench-bench4-vsync-check` (high at scale 1, older governor, 8 s) read med 16.7 and miss 1.05%. That
-    fails by a quarter of a frame, which is not significant.
+- **Under vsync** (1.5.1, 1 pass of 30 s, second virtual desktop; `bench-ab-vsync-151`, `bench-final-1.5.1-vsync-clean`), as
+  FPS / miss% / GPU ms: off 60 / 0 / 3.95, low 60 / 0 / 10.28, medium 59.8 / 0.06 / 12.12, high 60 / 0 / 12.23, ultra 60 / 0 / 12.50,
+  high-moving 60 / 0 / 12.38, ultra-moving 60 / 0 / 12.56. All hold. Same conditions on 1.5.0 at 100% (`bench-ab-vsync-150`):
+  high 59.8 / 0.45 / 14.07, ultra 60 / 0.11 / 13.95. The 1.8 GPU ms gap is one pass per row, so don't read much into it.
 - **1.4.0 baseline at the standard** (`bench-baseline-1.4.0-rd12`, 3 passes, med / p95gb):
   - vanilla 4.5 / 6.8, off 6.1 / 9.37;
   - low 15.1 / 19.2, medium 15.1 / 18.7, high 15.3 / 18.99, ultra 15.3 / 27.31.
@@ -216,17 +212,19 @@ clock to the same view (clock 40, same yaw) and cuts a scenario to 29-33 s. It r
 
 | goal | start with | why |
 |---|---|---|
-| hold 60 at the standard (uncapped) | **high (Auto)**, or low if Auto must stay at 1.0 | high 11.0 / p95gb2 14.45 at 0.85 has the widest margin of the enabled presets (`sh5-v7`); low 13.73 at 1.0 |
-| best quality that holds 60 under vsync | **ultra (Auto)** | SH5 v7 traces: miss 0.17% at scale 0.994, ultra-moving 0.59%. Confirm: `--vsync --seconds 30 --repeat 2 --scenarios vanilla,ultra,ultra-moving` (~8.5 min) |
-| cheapest shadows | **medium**, or `high+shadowCascades=false` | Shadows cost ~2 GPU ms at rd 12 (1.6 at rd 8). Filter, cascades and 1024-2048 maps are all noise, and cascades off halves redraws. Avoid shadowSize=4096 (+2.1, p95gb +11). Real savings come from renderScale (0.9 ≈ −1.3 on medium, 0.7 −2 to −3) or shadows off |
+| hold 60 at the standard (title screen) | any preset | 9.7-12.4 med, p95gb2 12.7-15.8 uncapped; at most 0.06% miss under vsync (§5). Says nothing about a real world |
+| cheapest shadows | **medium**, or `high+shadowCascades=false` | Shadows cost ~2 GPU ms at rd 12 (1.6 at rd 8). Filter, cascades and 1024-2048 maps are all noise, and cascades off halves redraws. Avoid shadowSize=4096 (+2.1, p95gb +11). The real saving is shadows off |
 | is my GLSL change a per-primitive regression? | `vanilla,off,vanilla@rd=8,off@rd=8` (screen) | Today's off tax is +0.1-0.4 GPU ms at rd 12. More than ~1 ms, growing with rd, means per-primitive cost, like the old flat varying (+3.0 at rd 12, +1.1 at rd 8) |
 | a player at rd 8 | high or ultra at scale 1 | 10.2-10.8 med, p95gb2 12.3 (`sh5-secondary`) |
 | worst secondary row to include | high@rd=10, high@fov=110 | 12.1 / 15.5 and 16.4 (0.3 from the line); FOV 70 is dearer for the script than FOV 110 |
-| did the effect knob X change cost? | fixed renderScale=1 rows, screen protocol, same run | Auto rows add 0.6-0.7 ms of governor noise, and single-knob costs at rd 12 are ≤ 0.8 ms |
+| did the effect knob X change cost? | screen protocol, same run | Single-knob costs at rd 12 are ≤ 0.8 ms |
 
 ## §8 Gotchas from the reports
 
 - **Results that look valid but aren't comparable:**
+  - **`bench-final-1.5.1-vsync`** is contaminated: 20 prewarmed windows on a second desktop, two audits running on the laptop for
+    pass 1, and the user looked at that desktop. high read 8.5% miss, ultra 11.9%, against 0% in the clean A/B minutes later, and
+    vanilla was inflated too. Which of those caused it is unknown. Keep `--prewarm` small and the laptop quiet under vsync.
   - **No `env.rd`** means rd 8 / FOV 70 (the 11-02 reports). Those numbers are not comparable to the rd-12 standard.
   - **`-moving` before `bench-bench2-motion-check`** means today's `-stress` (~1000-1470 redraws/min).
   - **p95gb2 exists only from `bench-sh5-v7` / `bench4-vsync-check` on.** Older verdicts used p95gb (the table prints

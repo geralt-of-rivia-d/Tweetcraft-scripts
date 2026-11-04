@@ -34,37 +34,26 @@ const KEY_MODULES = ['js/main.js', 'js/menus.js', 'js/ui.js', 'js/inventory.js',
   'js/survival/anvil.js', 'js/survival/book.js', 'js/survival/chestlabels.js', 'js/survival/end.js',
   'js/survival/onboarding.js', 'js/survival/screens.js'];
 const R = String.raw;
-const TRUE = '(?:true|!0)', FALSE = '(?:false|!1)', BOOL = '(?:true|false|!0|!1)'; // literal booleans, minified or not
 // Where a class method's body ends: "}" followed by the next method header "name(args) {".
 const METHOD_END = R`\}\s*(?!(?:if|for|while|switch|catch|else)\b)\w+\([\w,\s=]*\)\s*\{`;
-// Texture units 6 and up are never used: no TEXTURE6+ constant, no TEXTURE0 + computed unit (only + 0-5),
-// no sampler set to 6+ by uniform1i or a { uName: n } sampler map.
-const FREE_UNITS = /^(?![\s\S]*\bTEXTURE(?:[6-9]|[1-9]\d)\b)(?![\s\S]*\bTEXTURE0\s*\+(?!\s*[0-5]\b))(?![\s\S]*\.uniform1i\([^,()]+,\s*(?:[6-9]|[1-9]\d)\s*\))(?![\s\S]*\{\s*u\w+\s*:\s*(?:[6-9]|[1-9]\d)\s*\})/;
+// Texture units 6 and 7 are never used, and the game's extra atlas pages start at unit 8: no TEXTURE6+ constant, no
+// TEXTURE0 + computed unit (only + 0-5, or a page's + PAGE_UNIT + k - 1 with k >= 1), no sampler set to 6+ by
+// uniform1i or a { uName: n } sampler map.
+const FREE_UNITS = /^(?![\s\S]*\bTEXTURE(?:[6-9]|[1-9]\d)\b)(?![\s\S]*\bTEXTURE0\s*\+(?!\s*(?:[0-5]\b|PAGE_UNIT\s*\+\s*\w+\s*-\s*1\b)))(?![\s\S]*\.uniform1i\([^,()]+,\s*(?:[6-9]|[1-9]\d)\s*\))(?![\s\S]*\{\s*u\w+\s*:\s*(?:[6-9]|[1-9]\d)\s*\})/;
 // entities/index.js computes its unit in one helper, texture(gl, unit, ...): allowed there, if every call passes 0-5.
 const FREE_UNITS_ENTITIES = /^(?![\s\S]*\bTEXTURE(?:[6-9]|[1-9]\d)\b)(?![\s\S]*\.uniform1i\([^,()]+,\s*(?:[6-9]|[1-9]\d)\s*\))(?![\s\S]*\{\s*u\w+\s*:\s*(?:[6-9]|[1-9]\d)\s*\})(?=[\s\S]*\bfunction\s+(\w+)\(\s*(\w+)\s*,\s*(\w+)\s*,[^)]*\)\s*\{[^}]*?\.activeTexture\(\s*\2\.TEXTURE0\s*\+\s*\3\s*\))(?![\s\S]*\bTEXTURE0\s*\+(?!\s*(?:\3|[0-5])\b))(?![\s\S]*(?<!function\s+)\b\1\(\s*\2\s*,(?!\s*[0-5]\s*,))/;
 // No enable(POLYGON_OFFSET_FILL) reaches a draw call without its own polygonOffset() (right before or after the enable).
 const OWN_POLYGON_OFFSET = /^(?![\s\S]*?\.enable\(\s*\w+\.POLYGON_OFFSET_FILL\s*\)(?<!\.polygonOffset\([^)]*\)\s*;\s*\w+\.enable\(\s*\w+\.POLYGON_OFFSET_FILL\s*\))(?:(?!\.polygonOffset\(|\.draw(?:Elements|Arrays)\w*\()[\s\S])*?\.draw(?:Elements|Arrays)\w*\()/;
 // No render-to-texture and no colour clear (gfx.js, which owns the frame's clear, has its own entry).
 const NO_FBO_NO_CLEAR = /^(?![\s\S]*\.bindFramebuffer\()(?![\s\S]*\.clear\([^)]*\bCOLOR_BUFFER_BIT\b)/;
-// Shaders 1.5 scene FBO: what every main-context module must leave alone for the frame to render into our FBO and be
-// composited. No render targets of its own and no scissor or stencil test (the FBO has colour + depth only). No
-// viewport outside gfx.js (whose one call is the frame's, anchored separately), no depth-only clear outside gfx.js
-// (drawHeld's is the only one), and no readPixels. entities/debug.js, a draw benchmark main.js imports only in TEST
-// mode and runs outside the frame, may readPixels and clear depth. Every colorMask() takes literal booleans, and each
-// one with a false is put back to (true, true, true, true) before the next colorMask, so colour writes are on when
-// the composite draws.
+// The shadow tiles set a scissor box and a viewport without querying them first, and restore the framebuffer they found
+// (the game never uses scissor, and the frame's viewport is remembered by the viewport hook). So no main-context module
+// may use a render target or a scissor test of its own, and none outside gfx.js may set a viewport.
 const RTT_CALLS = ['bindFramebuffer', 'createFramebuffer', 'bindRenderbuffer', 'createRenderbuffer', 'framebufferTexture2D',
   'framebufferTextureLayer', 'framebufferRenderbuffer', 'blitFramebuffer', 'drawBuffers', 'readBuffer', 'invalidateFramebuffer', 'scissor'];
-const SCENE_FBO_SAFE = file => new RegExp('^' +
-  R`(?![\s\S]*\.(?:${[...RTT_CALLS, ...(file === 'js/gfx.js' ? [] : ['viewport']), ...(file === 'js/entities/debug.js' ? [] : ['readPixels'])].join('|')})\()` +
-  R`(?![\s\S]*\b(?:SCISSOR|STENCIL)_TEST\b)` +
-  (file === 'js/gfx.js' || file === 'js/entities/debug.js' ? '' : R`(?![\s\S]*\.clear\([^)]*\bDEPTH_BUFFER_BIT\b)`) +
-  R`(?![\s\S]*\.colorMask\((?!\s*${BOOL}\s*,\s*${BOOL}\s*,\s*${BOOL}\s*,\s*${BOOL}\s*\)))` +
-  R`(?![\s\S]*?\.colorMask\([^)]*\b${FALSE}[^)]*\)(?!(?:(?!\.colorMask\()[\s\S]){0,1500}?\.colorMask\(\s*${TRUE}\s*,\s*${TRUE}\s*,\s*${TRUE}\s*,\s*${TRUE}\s*\)))`);
-// No blend factor reads destination alpha. The scene FBO is RGBA8 with a real alpha channel, the canvas is alpha:false
-// (alpha reads as 1), so DST_ALPHA blending would look different through the FBO. (BLEND_DST_ALPHA, the getParameter
-// name crack/grace save and restore, is not matched: no word boundary before DST.)
-const NO_DST_ALPHA = /^(?![\s\S]*\b(?:DST_ALPHA|ONE_MINUS_DST_ALPHA|SRC_ALPHA_SATURATE)\b)/;
+const SHADOW_STATE_SAFE = file => new RegExp('^' +
+  R`(?![\s\S]*\.(?:${[...RTT_CALLS, ...(file === 'js/gfx.js' ? [] : ['viewport'])].join('|')})\()` +
+  R`(?![\s\S]*\bSCISSOR_TEST\b)`);
 // The performance overlay key (Better Options' tc.perfOverlay keybind): no "F2" string, .F2 property or keyCode 113.
 const NOT_F2 = /^(?![\s\S]*["'`]F2["'`])(?![\s\S]*\.F2\b)(?![\s\S]*\b(?:keyCode|which)\s*===?\s*113\b)/;
 // A GLSL float literal with the value x in any spelling: FL('0.50') matches 0.5, 0.50, .5; FL('1.0') matches 1.0, 1.
@@ -100,7 +89,17 @@ export const source = [
   // `#version 300 es(?=[^#]*A)(?=[^#]*B)` = A and B occur in the same shader (each one starts with #version).
   { script: SHADERS, file: 'shaders:fs', test: /#version 300 es(?=[^#]*sampler2DArray)(?=[^#]*vShade)(?=[^#]*uFog)(?=[^#]*vDist)/, why: 'terrain FS is recognised by #version 300 es + sampler2DArray + vShade + uFog + vDist in one shader' },
   { script: SHADERS, file: 'shaders:vs', test: /#version 300 es(?=[^#]*layout\s*\(\s*location\s*=\s*0\s*\)\s*in\s+uvec3\s+aPos\s*;)(?=[^#]*layout\s*\(\s*location\s*=\s*1\s*\)\s*in\s+uvec2\s+aInfo\s*;)/, why: 'the shadow-map program draws the terrain VAOs, so it needs aPos at location 0 and aInfo at location 1' },
-  { script: SHADERS, file: 'shaders:vs', test: /uint\s+(\w+)\s*=\s*aInfo\.y\s*;[^#]*?vUV\s*=\s*vec3\(\s*float\(\s*\1\s*&\s*1u\s*\)\s*,\s*float\(\s*\(\s*\1\s*>>\s*1u\s*\)\s*&\s*1u\s*\)\s*,\s*float\(\s*aInfo\.x\s*\)\s*\)|vUV\s*=\s*vec3\(\s*float\(\s*aInfo\.y\s*&\s*1u\s*\)\s*,\s*float\(\s*\(\s*aInfo\.y\s*>>\s*1u\s*\)\s*&\s*1u\s*\)\s*,\s*float\(\s*aInfo\.x\s*\)\s*\)/, why: 'aInfo.x is the atlas layer (class lookup) and bits 0/1 of aInfo.y the tile UV: waving pins the plant base (v=1), the shadow VS copies this decode' },
+  { script: SHADERS, file: 'shaders:vs', test: /uint\s+(\w+)\s*=\s*aInfo\.y\s*;[^#]*?(?:uint\s+(\w+)\s*=\s*aInfo\.x\s*\|\s*\(\s*\(\s*aPos\.z\s*>>\s*9u\s*\)\s*&\s*1u\s*\)\s*<<\s*8u\s*;\s*)?vUV\s*=\s*vec3\(\s*float\(\s*\1\s*&\s*1u\s*\)\s*,\s*float\(\s*\(\s*\1\s*>>\s*1u\s*\)\s*&\s*1u\s*\)\s*,\s*float\(\s*(?:aInfo\.x|\2)\s*\)\s*\)|vUV\s*=\s*vec3\(\s*float\(\s*aInfo\.y\s*&\s*1u\s*\)\s*,\s*float\(\s*\(\s*aInfo\.y\s*>>\s*1u\s*\)\s*&\s*1u\s*\)\s*,\s*float\(\s*aInfo\.x\s*\)\s*\)/, why: 'vUV.z is the atlas layer (class lookup), read from aInfo.x alone or, from 6b3963e444, through a 9-bit local, and bits 0/1 of aInfo.y are the tile UV: waving pins the plant base (v=1), the shadow VS copies this decode' },
+  // Build 6b3963e444 widened the layer to 9 bits. Staging is still on the 8-bit form, so both are accepted, but never a mix.
+  { script: SHADERS, file: 'shaders:vs', test: /^(?:(?=[\s\S]*\buint\s+\w+\s*=\s*aInfo\.x\s*\|\s*\(\s*\(\s*aPos\.z\s*>>\s*9u\s*\)\s*&\s*1u\s*\)\s*<<\s*8u\s*;)(?![\s\S]*\bfloat\(\s*aInfo\.x\s*\))|(?![\s\S]*\baPos\.z\s*>>)(?=[\s\S]*\bfloat\(\s*aInfo\.x\s*\)))/, why: 'layer = aInfo.x | ((aPos.z >> 9u) & 1u) << 8u in every terrain VS (or plain aInfo.x in all of them, on a build without bit 8): the script applies bit 8 only when it finds "aPos.z >> 9u" in the game\'s VS, and its tcLayer copies this decode in the terrain and shadow VS. The game\'s own local comes after the line where we insert code, so we can\'t reuse it' },
+  // The strip: every flat vGlass varying is rewritten to a plain one, in the VS and every FS (the two stages must agree).
+  { script: SHADERS, file: 'shaders:vs', test: /\bflat\s+out\s+float\s+vGlass\s*;|^(?![\s\S]*\bvGlass\b)/, why: 'the game declares "flat out float vGlass;" and we strip the flat qualifier, because by rule no terrain program keeps a flat varying (the smoke markers forbid one) and the two stages must agree. The strip has no measured benefit: on the title screen vanilla read 5.15 ms and off 5.00, inside the noise floor. If the declaration changes, the strip regex no longer matches and those markers fail. A build with no vGlass at all (staging) has nothing to strip' },
+  { script: SHADERS, file: 'shaders:fs', test: /\bflat\s+in\s+float\s+vGlass\s*;|^(?![\s\S]*\bvGlass\b)/, why: 'every terrain FS and FS_STAINED_DEPTH declare "flat in float vGlass;": we strip these too, including in sources patchSource() returns null for, because ESSL 3.00 needs the VS and FS to agree or the program fails to link' },
+  { script: SHADERS, file: 'shaders:vs', test: /^(?![\s\S]*\bflat\s+(?!out\s+float\s+vGlass\s*;))/, why: 'vGlass is the only flat varying in the game\'s vertex shaders: a new one would not be stripped (smoke would then fail on the "flat " markers)' },
+  { script: SHADERS, file: 'shaders:fs', test: /^(?![\s\S]*\bflat\s+(?!in\s+float\s+vGlass\s*;))/, why: 'vGlass is the only flat varying in the game\'s fragment shaders' },
+  { script: SHADERS, file: 'shaders:vs', test: /\bvGlass\s*=\s*float\(\s*\(\s*uGlass\[\s*(\w+)\s*>>\s*5u\s*\]\s*>>\s*\(\s*\1\s*&\s*31u\s*\)\s*\)\s*&\s*1u\s*\)\s*;|^(?![\s\S]*\bvGlass\b)/, why: 'stripping flat is safe because vGlass is exactly 0 or 1 and depends only on the layer, so it is constant over a quad and interpolation keeps it. If the game computes it from anything per-vertex, stripping changes what the 0.5 test sees' },
+  { script: SHADERS, file: 'shaders:fs', test: /^(?![\s\S]*\bvGlass\b(?!\s*;)(?!\s*[<>]\s*0\.5\b))/, why: 'the FS only compares vGlass with 0.5 (vGlass > 0.5 in mode 2, vGlass < 0.5 in FS_STAINED_DEPTH): any other use could see the interpolated value differently from a flat one' },
+  { script: SHADERS, file: 'js/gfx.js', test: /\.uniform1uiv\(\s*\w+\.u\[\s*["']uGlass\[0\]["']\s*\]\s*,|^(?![\s\S]*\buGlass\b)/, why: 'the game uploads uGlass only to programs where it is active, found by name: our VS patches must leave the "vGlass = ..." line and uGlass in place, or stained glass loses its near-face rule' },
   { script: SHADERS, file: 'shaders:fs', test: /#version 300 es(?=[^#]*uniform\s+float\s+uAmbient\s*;)(?=[^#]*uniform\s+vec3\s+uSkyLight\s*;)(?=[^#]*vec3\s+lightmap\s*\(\s*vec2\s+\w+\s*\))/, why: 'lit terrain FS: the shaded code calls lightmap(vec2) and uses uAmbient; uAmbient/uSkyLight uploads are watched for Nether/End' },
   { script: SHADERS, file: 'shaders:fs', test: /#version 300 es(?=[^#]*\/\s*\(\s*60\.0\s*-\s*3\.0\s*\*\s*\w+\s*\))(?=[^#]*bright\(\s*\w+\.y\s*\)\s*\*\s*1\.5)(?=[^#]*uSkyLight\s*\*\s*bright\(\s*\w+\.x\s*\))/, why: 'lit terrain FS: vLight.x is sky light and vLight.y block light, both 0-15 (l/(60-3l) curve); the shaded code divides them by 15' },
   { script: SHADERS, file: 'shaders:fs', test: LIGHTMAP, why: 'the game\'s whole light curve, bright(l) = mix(l / (60 - 3l), 1, uAmbient) and lightmap(l) (block light b = bright(l.y) * 1.5 with its warm polynomial tint, + uSkyLight * bright(l.x), the vec3(0.75)/0.04 mixes, the 0.50 gamma mix): the 1.5 lit terrain FS calls the game\'s own lightmap() for its block-light term (lightmap(vec2(0, vLight.y)) - uTcLm0), and the script computes uTcLm0 = lightmap(vec2(0)) on the CPU from the observed uAmbient/uSkyLight with the same curve, so any change to the game\'s curve, in any lit shader, must be copied into that CPU term' },
@@ -119,7 +118,8 @@ export const source = [
   { script: SHADERS, file: 'js/gfx.js', test: /^(?=[\s\S]*\.uniform3fv\(\s*\w+\.u\.uSkyLight\s*,)(?=[\s\S]*\.uniform1f\(\s*\w+\.u\.uAmbient\s*,)/, why: 'uSkyLight is uploaded with uniform3fv and uAmbient with uniform1f, the only hooks that read them' },
   { script: SHADERS, file: 'js/gfx.js', test: /\bend\s*:\s*\{[^}]*skyLight\s*:\s*\[\s*0?\.055\s*,\s*0?\.07\s*,\s*0?\.0625\s*\]/, why: 'isEnd() recognises the End by uSkyLight = (0.055, 0.07, 0.0625)' },
   { script: SHADERS, file: 'js/gfx.js', test: /\.ambient\s*=\s*\w+\s*===\s*["']nether["']\s*\?\s*0?\.1\s*:\s*0\b/, why: 'the Nether is recognised by uAmbient > 0.05 (the game uses 0.1 there, 0 elsewhere)' },
-  { script: SHADERS, file: 'js/gfx.js', test: /\.texImage3D\(\s*\w+\.TEXTURE_2D_ARRAY\s*,\s*0\s*,\s*\w+\.RGBA8\s*,\s*16\s*,\s*16\s*,\s*\w+\s*,\s*0\s*,\s*\w+\.RGBA\s*,\s*\w+\.UNSIGNED_BYTE\s*,\s*\w+\s*\)/, why: 'the atlas is read from texImage3D(TEXTURE_2D_ARRAY, 0, RGBA8, 16, 16, n, ..., pixels at argument 9)' },
+  { script: SHADERS, file: 'js/gfx.js', test: /\.texImage3D\(\s*\w+\.TEXTURE_2D_ARRAY\s*,\s*0\s*,\s*\w+\.RGBA8\s*,\s*16\s*,\s*16\s*,\s*\w+\s*,\s*0\s*,\s*\w+\.RGBA\s*,\s*\w+\.UNSIGNED_BYTE\s*,\s*(?!null\b)\w+(?:\.subarray\([^;]*?\))?\s*\)\s*;/, why: 'the atlas is read from texImage3D(TEXTURE_2D_ARRAY, 0, RGBA8, 16, 16, n, ..., pixels at argument 9): one call for the whole atlas, or (6b3963e444) once per page with data.subarray(...), so readAtlas must honour the view\'s byteOffset. Null pixels (allocate now, upload later) would leave us nothing to read' },
+  { script: SHADERS, file: 'js/gfx.js', test: /\bpages\s*=\s*Math\.ceil\(\s*\w+\s*\/\s*\w+\s*\)|^(?![\s\S]*\btexPages\b)/, why: 'a second atlas page exists only when the layer count outgrows the array size (pages = ceil(n / size), size = MAX_ARRAY_TEXTURE_LAYERS outside localhost tests): every normal GPU stays on one page, the path our terrain patches need' },
   { script: SHADERS, file: 'js/gfx.js', test: /\.texSubImage3D\(\s*\w+\.TEXTURE_2D_ARRAY\s*,\s*\w+\s*,\s*0\s*,\s*0\s*,\s*\w+\s*,/, why: 'animated layers are detected by texSubImage3D(TEXTURE_2D_ARRAY, level, 0, 0, layer, ...)' },
   { script: SHADERS, file: 'js/gfx.js', test: /\.activeTexture\(\s*\w+\.TEXTURE0\s*\)\s*;\s*\w+\.bindTexture\(\s*\w+\.TEXTURE_2D_ARRAY\s*,\s*this\.tArr\s*\)\s*;(?:(?!\.(?:activeTexture|bindTexture)\()[\s\S]){0,300}?\.pass\(\s*\w+\[\s*0\s*\]/, why: 'the atlas is bound on texture unit 0 (TEXTURE0 active) right before the first terrain pass, where the shadow pass runs: the cutout shadow FS samples uTex = 0' },
   // GL state at the frame's first terrain draw. renderShadow() runs inside it and restores this state without
@@ -139,10 +139,12 @@ export const source = [
   { script: SHADERS, file: 'js/remesh-sched.js', test: /^(?![\s\S]*\b(?:setTimeout|setInterval|requestIdleCallback|requestAnimationFrame|queueMicrotask|await|then)\b)[\s\S]*\btimed\(\s*(\w+)\s*,\s*(\w+)\s*\)\s*\{[^}]*?\b\1\(\s*\2\s*\)/, why: 'the remesh scheduler calls remesh(ci) synchronously from timed() and defers nothing (no timers, idle callbacks, rAF or await): remeshes happen only inside updateChunks(), at the start of a frame' },
   { script: SHADERS, file: 'js/gfx.js', test: /\.pass\(\s*(\w+)\[\s*0\s*\]\s*,\s*(\w+)\s*,\s*0\s*,[^;]*;\s*this\.pass\(\s*\1\[\s*1\s*\]\s*,\s*\2\s*,\s*1\s*,/, why: 'pass 0 (opaque) and pass 1 (cutout) draw the same visible-chunk list back to back: a column drawn in pass 0 whose pass-1 part is not drawn has an empty part, so its shadow record is dropped' },
   { script: SHADERS, file: 'js/gfx.js', test: /\bdropChunk\(\s*\w+\s*\)\s*\{[\s\S]{0,200}?for\s*\(\s*const\s+(\w+)\s+of\s+\w+\.parts\s*\)\s*if\s*\(\s*\1\s*\)\s*\{\s*this\.gl\.deleteVertexArray\(\s*\1\.vao\s*\)/, why: 'unloading a chunk (dropChunk) deletes its part VAOs: the deleteVertexArray hook drops their shadow records and marks the map dirty' },
-  { script: SHADERS, file: 'js/gfx.js', test: /\banimateLayer\(\s*\w+(?:\s*,\s*\w+)*\s*\)\s*\{[\s\S]{0,800}?\.activeTexture\(\s*\w+\.TEXTURE0\s*\)\s*;\s*\w+\.bindTexture\(\s*\w+\.TEXTURE_2D_ARRAY\s*,\s*this\.tArr\s*\)\s*;(?:(?!\.(?:activeTexture|bindTexture)\()[\s\S]){0,200}?\.texSubImage3D\(\s*\w+\.TEXTURE_2D_ARRAY\s*,\s*\w+\s*,\s*0\s*,\s*0\s*,\s*\w+\s*,/, why: 'atlas animation (water, lava, fire, portals) is texSubImage3D(TEXTURE_2D_ARRAY, level, 0, 0, layer) on the atlas on unit 0, never units 6/7: once block names are known the hook ignores it (no reclassify, no shadow refresh)' },
+  { script: SHADERS, file: 'js/gfx.js', test: /\banimateLayer\(\s*\w+(?:\s*,\s*\w+)*\s*\)\s*\{[\s\S]{0,800}?\.activeTexture\(\s*(?:\w+\s*\?\s*\w+\.TEXTURE0\s*\+\s*PAGE_UNIT\s*\+\s*\w+\s*-\s*1\s*:\s*)?\w+\.TEXTURE0\s*\)\s*;\s*\w+\.bindTexture\(\s*\w+\.TEXTURE_2D_ARRAY\s*,\s*(?:this\.tPages\?\.\[\s*\w+\s*\]\s*\|\|\s*)?this\.tArr\s*\)\s*;(?:(?!\.(?:activeTexture|bindTexture)\()[\s\S]){0,200}?\.texSubImage3D\(\s*\w+\.TEXTURE_2D_ARRAY\s*,\s*\w+\s*,\s*0\s*,\s*0\s*,\s*\w+\s*,/, why: 'atlas animation (water, lava, fire, portals) is texSubImage3D(TEXTURE_2D_ARRAY, level, 0, 0, layer) on the atlas, on unit 0 or a page on PAGE_UNIT + page - 1, never units 6/7. The layer argument is the in-page layer, the same number on a one-page atlas: once block names are known the hook ignores it (no reclassify, no shadow refresh)' },
   { script: SHADERS, file: 'js/gfx.js', test: /\.clear\([^)]*\bCOLOR_BUFFER_BIT\b/, why: 'a frame is counted on clear(COLOR_BUFFER_BIT)' },
+  { script: SHADERS, file: 'js/gfx.js', exports: ['Gfx'], why: 'the smoke check of the stained-glass depth program catches the Gfx instance through Gfx.prototype.draw: the game exposes it nowhere else outside its dev builds' },
+  { script: SHADERS, file: 'js/gfx.js', test: /^(?=[\s\S]*\bthis\.pStainedDepth\s*=\s*this\.prog\(\s*VS_TERRAIN\s*,\s*FS_STAINED_DEPTH\s*\))(?=[\s\S]*\bthis\.pTerrain\s*=\s*\[\s*0\s*,\s*1\s*,\s*2\s*\]\.map\()/, why: 'the stained-glass depth pass pairs the terrain VS (which we patch) with a FS we leave alone: that program must stay on uFx = 0, or plants wave with no lighting to match. The smoke check reads this.pStainedDepth, with this.pTerrain as its control' },
   // Main-context invariants, checked in every module that uses it (MAIN_GL above)
-  ...MAIN_GL.map(file => ({ script: SHADERS, file, test: file === 'js/entities/index.js' ? FREE_UNITS_ENTITIES : FREE_UNITS, why: 'texture units 6, 7 and 8 stay free: the shadow map, the class lookup and (1.5) the scene colour texture stay bound there for the whole session' })),
+  ...MAIN_GL.map(file => ({ script: SHADERS, file, test: file === 'js/entities/index.js' ? FREE_UNITS_ENTITIES : FREE_UNITS, why: 'texture units 6 and 7 stay free: the shadow map and the class lookup stay bound there for the whole session. The game\'s extra atlas pages begin at PAGE_UNIT = 8, the only computed unit allowed here' })),
   ...MAIN_GL.map(file => ({ script: SHADERS, file, test: OWN_POLYGON_OFFSET, why: 'renderShadow() resets polygonOffset(0, 0) without querying it: every enable(POLYGON_OFFSET_FILL) sets its own offset before drawing (today only survival/chesticons.js)' })),
   ...MAIN_GL.filter(file => file !== 'js/gfx.js').map(file => ({ script: SHADERS, file, test: NO_FBO_NO_CLEAR, why: 'no render-to-texture and no colour clear outside gfx.js: frames are counted on the one colour clear, and the shadow pass restores the default framebuffer state it found' })),
   { script: SHADERS, file: 'js/gfx.js', test: /^(?![\s\S]*\.bindFramebuffer\()(?=(?:[\s\S]*?\.clear\([^)]*\bCOLOR_BUFFER_BIT\b){2})(?!(?:[\s\S]*?\.clear\([^)]*\bCOLOR_BUFFER_BIT\b){3})(?=[\s\S]*\bif\s*\(\s*\w+\.wall\s*\)\s*\{\s*this\.drawWall\([^)]*\)\s*;\s*return\s*;?\s*\}(?:(?!\.clear\()[\s\S]){0,1500}?\.clear\([^)]*\bCOLOR_BUFFER_BIT\b)(?=[\s\S]*\bdrawWall\([^)]*\)\s*\{[^}]{0,300}?\.clear\([^)]*\bCOLOR_BUFFER_BIT\b)/, why: 'one colour clear per frame on the main context, no render-to-texture: draw() clears once, or hands the frame to drawWall() (which clears) and returns. frameId, the camFrame gate and the blind LEQUAL/depthMask(true) restore all assume this' },
@@ -150,26 +152,25 @@ export const source = [
   { script: SHADERS, file: 'js/main.js', test: /loadTiles\(\s*\w+\.texNames\s*\)[\s\S]{0,200}?\.texNames\.indexOf\(\s*["']oak_planks["']\s*\)[\s\S]{0,200}?\.setTiles\(/, why: 'the list searched for "oak_planks" is texNames, the same list that orders the atlas layers passed to setTiles' },
   { script: SHADERS, file: 'engine.wasm', test: /^(?=[\s\S]*oak_leaves)(?=[\s\S]*water_still)(?=[\s\S]*short_grass)(?=[\s\S]*glowstone)/, why: 'layers are classified by texture name (*leaves*, water*, the plant list, the emissive list)' },
   { script: SHADERS, file: 'js/main.js', test: /^(?![\s\S]*["']KeyK["'])/, why: 'K (the shader toggle) is not a game key' },
-  // --- Twitterentary shaders 1.5: scene FBO (render scale) and composite. The viewport hook binds our FBO on the
-  // frame's one viewport call and forwards a scaled viewport; a microtask queued there draws the FBO to the canvas
-  // after the game's rAF callback returns. These are the game facts that pipeline relies on.
-  { script: SHADERS, file: 'js/gfx.js', test: /^(?![\s\S]*\.viewport\([\s\S]*\.viewport\()[\s\S]*(?<!\basync\s+)\bdraw\(\s*(\w+)\s*\)\s*\{(?:(?!\.\w+\()[^{}]){0,200}?\.viewport\(\s*0\s*,\s*0\s*,\s*\1\.w\s*,\s*\1\.h\s*\)/, why: 'Gfx.draw(v) (not async) calls viewport(0, 0, v.w, v.h) before any other method call, and it is gfx.js\'s only viewport: the scene FBO is bound on that call, and every later pass of the frame inherits the scaled viewport we forward' },
-  ...MAIN_GL.map(file => ({ script: SHADERS, file, test: SCENE_FBO_SAFE(file), why: file === 'js/gfx.js'
-    ? 'no render target, scissor or stencil test, readPixels or colorMask left off: the frame renders into our colour + depth scene FBO unchanged, and colour writes are on when the composite draws'
-    : file === 'js/entities/debug.js'
-      ? 'no viewport, render target, scissor or stencil test, or colorMask left off (this TEST-mode draw benchmark may readPixels and clear depth, outside the frame): what it draws lands in our scene FBO at the scaled viewport'
-      : 'no viewport (gfx.js draw() sets the frame\'s only one), render target, scissor or stencil test, depth-only clear, readPixels or colorMask left off: everything this module draws lands in our scene FBO at the scaled viewport' })),
-  ...MAIN_GL.map(file => ({ script: SHADERS, file, test: NO_DST_ALPHA, why: 'no blend factor reads destination alpha: the scene FBO is RGBA8 with real alpha, the canvas is alpha:false, so DST_ALPHA blending would differ through the FBO' })),
-  { script: SHADERS, file: 'js/main.js', test: /^(?![\s\S]*\.(?:viewport|scissor|bindFramebuffer|createFramebuffer|bindRenderbuffer|createRenderbuffer|framebufferTexture2D|blitFramebuffer|readPixels|colorMask)\()(?![\s\S]*\b(?:SCISSOR|STENCIL)_TEST\b)/, why: 'main.js reaches gfx.gl directly (textures, isContextLost, the GPU name) but sets no viewport, render target, scissor/stencil test, readPixels or colorMask: the scene FBO and composite see only gfx.js\'s frame state' },
-  { script: SHADERS, file: 'js/gfx.js', test: new RegExp(R`\bclass Gfx\s*\{\s*constructor\(\s*(\w+)\s*\)\s*\{\s*const\s+\w+\s*=\s*\1\.getContext\(\s*["']webgl2["']\s*,\s*\{(?=[^}]*\bantialias\s*:\s*${FALSE}\s*[,}])(?=[^}]*\balpha\s*:\s*${FALSE}\s*[,}])(?=[^}]*\bdepth\s*:\s*${TRUE}\s*[,}])(?![^}]*\b(?:preserveDrawingBuffer|stencil)\s*:\s*(?!${FALSE}\s*[,}]))[^}]*\}\s*\)`), why: 'the main context is created in the Gfx constructor with antialias:false, alpha:false, depth:true and no preserveDrawingBuffer or stencil: an FBO + upscale matches the unscaled image (no MSAA lost), alpha is ignored, our depth texture replaces the default depth buffer, and the composite must land in the same rAF task' },
-  { script: SHADERS, file: 'js/main.js', test: /\b(\w+)\s*=\s*[\w$.]+\(\s*["']#gl["']\s*\)[\s\S]*?\bconst\s+(\w+)\s*=\s*\1\.width\s*,\s*(\w+)\s*=\s*\1\.height\b[\s\S]{0,4000}?\.draw\(\s*\{[^}]*?\bw\s*:\s*\2\s*,\s*h\s*:\s*\3\b/, why: 'the frame is drawn at the #gl canvas size, gfx.draw({w: glCanvas.width, h: glCanvas.height}): the frame viewport is the whole canvas, and the scene FBO follows canvas.width/height read at that viewport (resize, .pix menus, regainCanvases)' },
-  { script: SHADERS, file: 'js/main.js', test: /\.draw\(\s*\{[^}]*?\bw\s*:\s*\w+\s*,\s*h\s*:(?:(?!\bawait\b)[\s\S]){0,800}?\}\s*\)\s*;\s*if\s*\(\s*(\w+)\s*&&\s*!\w+\s*\)\s*\{\s*\1\.drawCrack\([^;]*;(?:(?!\bawait\b)[\s\S]){0,300}?\.drawHeld\((?:(?!\bawait\b)[\s\S]){0,200}?\.drawFireOverlay\(/, why: 'after gfx.draw() returns, main.js draws the survival crack, hands and fire overlay with no await in between: they run in the same rAF task as the frame viewport, so they land in the scene FBO before the composite microtask runs' },
-  { script: SHADERS, file: 'js/gfx.js', test: new RegExp(R`(?<!\basync\s+)\bdraw\(\s*(\w+)\s*\)\s*\{(?:(?!${METHOD_END})[\s\S])*?\b(\w+)\.depthMask\(\s*${TRUE}\s*\)\s*;\s*\2\.disable\(\s*\2\.BLEND\s*\)\s*;\s*\2\.enable\(\s*\2\.CULL_FACE\s*\)\s*;\s*if\s*\(\s*\1\.held\s*\)\s*this\.drawHeld\(\s*\1\.held\s*,\s*\1\.w\s*\/\s*\1\.h\s*\)\s*;?\s*\}`), why: 'draw() ends with depthMask(true), disable(BLEND), enable(CULL_FACE) and then (creative) drawHeld(v.held, v.w / v.h): the end-of-frame state the composite finds and puts back' },
-  { script: SHADERS, file: 'js/gfx.js', test: new RegExp(R`\bdrawWall\([^)]*\)\s*\{(?:(?!${METHOD_END})[\s\S])*?\.disable\(\s*\w+\.BLEND\s*\)(?:(?!\.enable\(\s*\w+\.BLEND\b|\.depthMask\(|${METHOD_END})[\s\S])*?\.enable\(\s*\w+\.DEPTH_TEST\s*\)\s*;\s*\w+\.enable\(\s*\w+\.CULL_FACE\s*\)\s*;?\s*\}`), why: 'a frame with the camera inside a block (drawWall, after the frame viewport) ends in the same state as a normal one: BLEND off, then DEPTH_TEST and CULL_FACE back on (draw() set depthMask(true) before it)' },
-  { script: SHADERS, file: 'js/gfx.js', test: /^(?=[\s\S]*\bdrawHeld\(\s*\w+\s*,\s*\w+\s*\)\s*\{\s*const\s+(\w+)\s*=\s*this\.gl\s*;\s*\1\.clear\(\s*\1\.DEPTH_BUFFER_BIT\s*\))(?![\s\S]*\.clear\(\s*[\w$.]*\bDEPTH_BUFFER_BIT\s*\)[\s\S]*\.clear\(\s*[\w$.]*\bDEPTH_BUFFER_BIT\s*\))/, why: 'drawHeld() starts with clear(DEPTH_BUFFER_BIT), gfx.js\'s only depth-only clear: the hands clear the scene FBO\'s depth texture (it needs one), so scene depth is gone after the hand pass (in survival, main.js calls drawHeld after draw())' },
+  // --- Twitterentary shaders: how a frame is drawn. The viewport hook detects the frame and starts its timing on the
+  // frame's one viewport call, and the shadow pass restores what it found. These are the game facts that relies on.
+  { script: SHADERS, file: 'js/gfx.js', test: /^(?![\s\S]*\.viewport\([\s\S]*\.viewport\()[\s\S]*(?<!\basync\s+)\bdraw\(\s*(\w+)\s*\)\s*\{(?:(?!\.\w+\()[^{}]){0,200}?\.viewport\(\s*0\s*,\s*0\s*,\s*\1\.w\s*,\s*\1\.h\s*\)/, why: 'Gfx.draw(v) (not async) calls viewport(0, 0, v.w, v.h) before any other method call, and it is gfx.js\'s only viewport: the viewport hook detects the frame on that call and remembers it as the viewport the shadow pass restores' },
+  ...MAIN_GL.map(file => ({ script: SHADERS, file, test: SHADOW_STATE_SAFE(file), why: file === 'js/gfx.js'
+    ? 'no render target and no scissor: the shadow tiles leave their scissor box set without restoring it, and put back the framebuffer they found'
+    : 'no viewport (gfx.js draw() sets the frame\'s only one), render target or scissor: the shadow tiles leave their scissor box set, and restore only the frame viewport and framebuffer they found' })),
+  { script: SHADERS, file: 'js/main.js', test: /^(?![\s\S]*\.(?:viewport|scissor|bindFramebuffer|createFramebuffer|bindRenderbuffer|createRenderbuffer|framebufferTexture2D|blitFramebuffer)\()(?![\s\S]*\bSCISSOR_TEST\b)/, why: 'main.js reaches gfx.gl directly (textures, isContextLost, the GPU name) but sets no viewport, render target or scissor: the shadow pass sees only gfx.js\'s frame state' },
+  { script: SHADERS, file: 'js/main.js', test: /\b(\w+)\s*=\s*[\w$.]+\(\s*["']#gl["']\s*\)[\s\S]*?\bconst\s+(\w+)\s*=\s*\1\.width\s*,\s*(\w+)\s*=\s*\1\.height\b[\s\S]{0,4000}?\.draw\(\s*\{[^}]*?\bw\s*:\s*\2\s*,\s*h\s*:\s*\3\b/, why: 'the frame is drawn at the #gl canvas size, gfx.draw({w: glCanvas.width, h: glCanvas.height}): the frame viewport is the whole canvas, read fresh each frame, so nothing of ours caches the canvas size (resize, .pix menus)' },
+  { script: SHADERS, file: 'js/main.js', test: /\.draw\(\s*\{[^}]*?\bw\s*:\s*\w+\s*,\s*h\s*:(?:(?!\bawait\b)[\s\S]){0,800}?\}\s*\)\s*;\s*if\s*\(\s*(\w+)\s*&&\s*!\w+\s*\)\s*\{\s*\1\.drawCrack\([^;]*;(?:(?!\bawait\b)[\s\S]){0,300}?\.drawHeld\((?:(?!\bawait\b)[\s\S]){0,200}?\.drawFireOverlay\(/, why: 'after gfx.draw() returns, main.js draws the survival crack, hands and fire overlay with no await in between: they run in the same rAF task as the frame viewport, so they fall inside the frame\'s timed span (perf.cpuMs, the GPU timer query)' },
   { script: SHADERS, file: 'js/frameloop.js', test: /\bfunction\s+createFrameLoop\(\s*(\w+)\s*,\s*(\w+)\s*=\s*(\w+)\s*=>\s*requestAnimationFrame\(\s*\3\s*\)\s*\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,300}?\bconst\s+(\w+)\s*=\s*(\w+)\s*=>\s*\{[^{}]*?=\s*\2\(\s*\4\s*\)[^{};]*;\s*\1\(\s*\5\s*\)\s*;?\s*\}/, why: 'createFrameLoop(frame, raf = fn => requestAnimationFrame(fn)) re-arms with the same step function before calling frame(now), and looks up the global requestAnimationFrame at each call: our rAF wrapper (installed at document-start) sees every frame, and its one cached wrapper per callback is reused' },
   { script: SHADERS, file: 'js/main.js', test: /\bcreateFrameLoop\(\s*\w+\s*\)/, why: 'main.js creates its frame loop with the default raf (the global requestAnimationFrame), so our wrapper times the game\'s callback' },
-  { script: SHADERS, file: 'js/main.js', test: /\b(\w+)\s*=\s*[\w$.]+\(\s*["']#gl["']\s*\)[\s\S]*?\bfunction\s+regainCanvases\(\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,200}?\bfor\s*\(\s*const\s+(\w+)\s+of\s*\[[^\]]*\b\1\b[^\]]*\]\s*\)\s*\{\s*const\s+(\w+)\s*=\s*\2\.width\s*;\s*\2\.width\s*=[^;]+;\s*\2\.width\s*=\s*\3\s*;?\s*\}/, why: 'gpuwatch (new in 325afb04b5): when FPS stays low, regainCanvases() sets #gl.width to 1 or 2 and straight back, reallocating the drawing buffer at the same size. The scene FBO tolerates that because it follows canvas.width/height at each frame viewport; nothing caches the canvas size' },
+  // perf.fpsGame copies the game's F3 counter. S isn't exported and F3 is drawn on the HUD canvas, so a change to the
+  // game's window can only be caught here.
+  { script: SHADERS, file: 'js/main.js', test: /\bfunction\s+frame(?:Body)?\(\s*(\w+)\s*\)\s*\{(?:(?!\bfunction\s+\w+\s*\()[\s\S])*?\b(\w+)\+\+\s*;\s*if\s*\(\s*\1\s*-\s*(\w+)\s*>\s*1e3\s*\)\s*\{\s*\w+\.fps\s*=\s*\2\s*;\s*\2\s*=\s*0\s*;\s*\3\s*=\s*\1\b/, why: 'the game\'s FPS is a frame count, not a mean: frames++, and when now - fpsT > 1e3 (on the rAF timestamp) S.fps = frames; frames = 0; fpsT = now. perf.fpsGame repeats exactly this, so F2 and F3 agree: if the game changes its window, change perfFrame()' },
+  { script: SHADERS, file: 'js/main.js', test: /\$\{\s*\w+\.fps\s*\}\s*fps,\s*\$\{\s*\w+\.chunks\.size\s*\}\s*chunks/, why: 'F3\'s first line is `${S.fps} fps, ${gfx.chunks.size} chunks`: the number the F2 overlay has to match is that S.fps, shown unrounded' },
+  // The atlas outgrowing one array texture (js/texpages.js). Staging lacks this file until it gets build 6b3963e444, so
+  // these two entries stay red there until then: a deliberate decision, rather than an optional-file flag in tools/.
+  { script: SHADERS, file: 'js/texpages.js', test: /^(?=[\s\S]*\bPAGE_UNIT\s*=\s*8\b)(?=[\s\S]*=\s*PAGE_UNIT\s*\+\s*\w+\s*-\s*1\b)/, why: 'the game\'s extra atlas pages start at texture unit PAGE_UNIT = 8 (page k on PAGE_UNIT + k - 1): our units 6 and 7 stay free, and anything we add must stay below 8. (Staging lacks this file until it gets build 6b3963e444, so this is red there.)' },
+  { script: SHADERS, file: 'js/texpages.js', test: /\\\\btexture\\\\\(\\\\s\*\$\{(\w+)\}\\\\s\*,`\s*,\s*["']g["']\s*\)\s*,\s*`\$\{\1\}_t\(`/, why: 'on a paged atlas pagedFS() rewrites texture(uTex, to uTex_t(, so our "vec4 c = texture(uTex, vUV);" anchor no longer matches: patchTerrainFS() returns null and that player gets the vanilla look, by design. (Staging lacks this file until it gets build 6b3963e444, so this is red there.)' },
 
   // --- Better Options (and Zoom, which reuses its FOV plumbing)
   { script: [OPTIONS, ZOOM], file: 'js/menus.js', exports: ['openOptions', 'closeMenu'], why: 'opens the Options screen to reach the FOV slider; Better Options\' "Game options…" button opens it for the player' },
@@ -226,7 +227,7 @@ export const source = [
   // Better Options: UI scale and button labels
   { script: OPTIONS, file: 'js/main.js', test: /^(?=[\s\S]*Math\.min\(\s*innerWidth\s*\/\s*280\s*,\s*innerHeight\s*\/\s*190\s*\))(?=[\s\S]*\?\s*1\.75\s*:\s*1\.25\b)(?=[\s\S]*setProperty\(\s*["']--d["']\s*,\s*Math\.max\(\s*1\s*,\s*Math\.round\(\s*\w+\s*\*\s*\w+\s*\)\s*-\s*1\s*\)\s*\/\s*\w+)(?=[\s\S]*documentElement\.style\s*;\s*\w+\.setProperty\(\s*["']--u["'])(?=[\s\S]*matchMedia\(\s*["']\(pointer: coarse\)["']\s*\))/, why: 'uiBase() copies the game\'s --u/--d formula and touch test; the game sets them inline on <html>, so we reassert' },
   { script: OPTIONS, file: 'style.css', test: /#cross\s*\{[^}]*transform:\s*translate\(\s*-50%\s*,\s*-50%\s*\)/, why: 'our CSS replaces #cross\'s transform with translate(-50%, -50%) scale(--tc-s)' },
-  { script: OPTIONS, file: 'index.html', test: 'id="cross"', why: 'the crosshair is #cross' },
+  { script: [OPTIONS, ZOOM], file: 'index.html', test: 'id="cross"', why: 'the crosshair is #cross' },
   { script: OPTIONS, file: 'style.css', test: /font-family:\s*["']Tweetcraft["']/, why: 'our screen uses the game\'s "Tweetcraft" font' },
   { script: OPTIONS, file: 'style.css', test: /\.mcb:hover[^{]*\{[^}]*border-image-source:\s*url\(\s*\/assets\/gui\/button_highlighted\.png\s*\)/, why: 'the active tab copies the hover look (border-image /assets/gui/button_highlighted.png)' },
   { script: OPTIONS, file: 'style.css', test: /^(?=[\s\S]*\.mcb\s*\{[^}]*border-image:\s*url\(\s*\/assets\/gui\/button\.png\s*\)\s*3\s+fill\b)(?=[\s\S]*\.fov-control\s+input::-webkit-slider-thumb\s*\{[^}]*border-image:\s*url\(\s*\/assets\/gui\/button\.png\s*\)\s*3\s+fill\b)/, why: 'our slider thumb copies the game\'s FOV-slider thumb: border-image url(/assets/gui/button.png) 3 fill, the same image as .mcb buttons' },
@@ -253,8 +254,8 @@ export const source = [
   ...KEY_MODULES.map(file => ({ script: OPTIONS, file, test: NOT_F2, why: 'F2 (default key of the performance overlay, tc.perfOverlay) is not a game key here: no "F2" code or key, .F2 or keyCode 113' })),
   { script: OPTIONS, file: 'js/main.js', test: /\bPREVENT\s*=\s*new\s+Set\(\s*\[(?![^\]]*["']F2["'])[^\]]*["']F1["'][^\]]*["']F3["'][^\]]*\]\s*\)/, why: 'the game preventDefaults F1/F3/F5 but not F2: our F2 handler calls preventDefault itself' },
   // "Run benchmark" shows a see-through screen (menus.showScreen("tcbench", build, ""), #screen class "on") while it runs
-  { script: OPTIONS, file: 'js/main.js', test: /\bfunction\s+\w+\(\s*\w+\s*\)\s*\{\s*const\s+(\w+)\s*=[^;]*?!\s*\w+\.menu\b[^;]*;\s*const\s+(\w+)\s*=\s*\w+\.sample\([^,]*,\s*\1\s*,[^)]*\)\s*;\s*if\s*\(\s*\2\s*===\s*["']regain["']\s*\)\s*regainCanvases\(\)/, why: 'the slow-frame watch counts only frames with no menu open (steady = ... && !S.menu): while our benchmark screen is shown, regainCanvases() cannot reallocate the canvas mid-run, and the bench\'s slow frames do not count towards it' },
-  { script: OPTIONS, file: 'js/menus.js', test: /\bfunction showScreen\(\s*\w+\s*,\s*(\w+)\s*,\s*\w+\s*\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,600}?\.menu\s*=\s*\1\s*;(?:(?!\bfunction\b)[\s\S]){0,300}?\.releaseInput\(\)/, why: 'showScreen() sets S.menu and calls releaseInput() (held keys, look and pointer lock dropped): the player cannot move or look while the benchmark screen is up' },
+  { script: OPTIONS, file: 'js/main.js', test: /\bfunction\s+\w+\(\s*\w+\s*\)\s*\{\s*const\s+(\w+)\s*=[^;]*?!\s*\w+\.menu\b[^;]*;\s*const\s+(\w+)\s*=\s*\w+\.sample\([^,]*,\s*\1\s*,[^)]*\)\s*;\s*if\s*\(\s*\2\s*===\s*["']regain["']\s*\)\s*regainCanvases\(\)/, why: 'the slow-frame watch counts only frames with no menu open (steady = ... && !S.menu): while our benchmark screen is shown, the bench\'s slow frames do not count towards it, so regainCanvases() (the HUD canvas and font atlas) cannot fire mid-run' },
+  { script: OPTIONS, file: 'js/menus.js', test: /\bfunction showScreen\(\s*\w+\s*,\s*(\w+)\s*,\s*\w+\s*\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,600}?\.menu\s*=\s*\1\s*;(?:(?!\bfunction\b)[\s\S]){0,300}?\.releaseInput\(\)/, why: 'showScreen() sets S.menu and calls releaseInput() (held keys, look and pointer lock dropped): the player cannot move or look while the benchmark screen is up, and it is why prime() must never open a menu during play (it would drop pointer lock)' },
   { script: OPTIONS, file: 'js/main.js', test: /\bshow\s*=\s*(\w+)\.started\s*&&\s*\1\.showHud\s*&&\s*!\w+\s*[,;]/, why: 'the in-world HUD, hand and selection follow show = S.started && S.showHud && !CARD, with no S.menu term: behind the see-through benchmark screen the world draws as in play' },
   // "Reset all options" turns the HUD back on only if it is really off (our saved flag can be stale): it reads #hudtop
   { script: OPTIONS, file: 'index.html', test: 'id="hudtop"', why: 'the in-world HUD bar is #hudtop' },
@@ -275,11 +276,23 @@ export const source = [
   // Better Options 1.2: the benchmark screen is watched (MutationObserver) and stops the run when the game replaces it
   { script: OPTIONS, file: 'js/menus.js', test: /\bconst\s+(\w+)\s*=\s*document\.querySelector\(\s*["']#screen["']\s*\)\s*,\s*(\w+)\s*=\s*document\.querySelector\(\s*["']#screen \.inner["']\s*\)(?![\s\S]*(?<![.\w])\2\s*=(?!=))(?![\s\S]*(?<![.\w])(?:\1|\2)\.(?:remove|replaceWith|outerHTML)\b)(?=[\s\S]*\bfunction\s+showScreen\(\s*\w+\s*,\s*(\w+)\s*,\s*(\w+)\s*\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,600}?\b\2\.replaceChildren\(\s*\.\.\.\3\(\)\.filter\(\s*Boolean\s*\)\s*\)\s*;\s*\1\.className\s*=\s*["']on["']\s*\+\s*\(\s*\4\s*\?)(?=[\s\S]*\bfunction\s+closeMenu\(\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,400}?\b\1\.className\s*=\s*["']["']\s*;\s*\2\.replaceChildren\(\s*\))/, why: 'menus.js looks #screen and #screen .inner up once and never replaces them; showScreen() replaces .inner\'s children and sets #screen\'s class, closeMenu() sets class "" and empties .inner: an observer on #screen[class] and .inner\'s child list sees every screen change, so the benchmark stops as soon as the game takes its screen away' },
   { script: OPTIONS, file: 'js/main.js', test: /\bfunction\s+(\w+)\(\s*(\w+)\s*\)\s*\{(?:(?!\bfunction\s+\w+\s*\()[\s\S])*?\bif\s*\(\s*(\w+)\.menu\s*\)\s*\{(?:(?!\bfunction\b)[^{}])*?\bif\s*\(\s*\2\.code\s*===\s*["']Escape["'][^{}]*?\)\s*\{\s*\2\.preventDefault\(\)\s*;\s*if\s*\(\s*\3\.menuName\s*===\s*["']pause["']\s*\)\s*\w+\(\)\s*;?\s*else\s+\w+\.back\(\)\s*;?\s*\}\s*return\s*;?\s*\}[\s\S]*[{;]\s*addEventListener\(\s*["']keydown["']\s*,\s*\1\s*\)/, why: 'with a menu open, the game handles Escape only in its window keydown listener (bubble phase, no capture): it calls M.back() (which would open the pause menu over the benchmark) and returns. Our capture-phase window listener runs first, so on the benchmark screen it consumes Escape (stopImmediatePropagation) and stops the run instead' },
+  // Better Options 1.3: "Copy all settings" reads these named keys, never all of mc.* (see the settingsText() check)
+  { script: OPTIONS, file: 'js/main.js', test: /\bheldLight\s*:\s*\w+\.get\(\s*["']mc\.heldLight["']\s*\)\s*!==\s*["']0["']/, why: 'mc.heldLight is on unless it is "0": Copy settings reports it as a boolean the same way' },
+  { script: OPTIONS, file: 'js/fireflies.js', test: /\bKEY\s*=\s*["']mc\.fireflies["']/, why: 'the fireflies setting is stored in mc.fireflies, which Copy settings reports' },
+  { script: OPTIONS, file: 'js/i18n.js', test: /\bLANG_KEY\s*=\s*["']mc\.lang["']/, why: 'the language is stored in mc.lang, which Copy settings reports' },
+  // Better Options 1.3 and Zoom 1.1.1: priming the FOV input (bus.fov.prime) only when it can't disturb the player
+  { script: [OPTIONS, ZOOM], file: 'js/main.js', test: /\b(\w+)\s*=\s*[\w$.]+\(\s*["']#cross["']\s*\)[\s\S]*?\b\1\.classList\.toggle\(\s*["']off["']\s*,\s*!\(\s*\w+\s*&&\s*!\w+\.menu\b/, why: '#cross has class "off" whenever a menu is open or the in-world HUD is not drawn, so a #cross without "off" means the world is on screen with no menu: our only DOM proof that S.menu is empty, which prime()\'s idle test needs' },
+  { script: [OPTIONS, ZOOM], file: 'js/main.js', test: /\bfunction\s+releaseInput\(\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,300}?\bdocument\.exitPointerLock\(\)/, why: 'releaseInput() drops pointer lock with a dynamic document.exitPointerLock() call: we shadow that method for one synchronous task so a priming pass keeps pointer lock. If the game cached the function, the shadow would silently stop working' },
+  { script: [OPTIONS, ZOOM], file: 'js/main.js', test: /\bfunction\s+onLockChange\(\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,500}?\bif\s*\(\s*\w+\.started\s*&&\s*\w+\.input\s*===\s*["']lock["']\s*&&\s*!\w+\.menu\b(?:(?!\bfunction\b)[\s\S]){0,200}?\bopenPause\(\)/, why: 'losing pointer lock while a world runs with no menu open opens the pause menu (onLockChange): why a lock lost during the old first-press FOV steal looked like a broken zoom, and why both scripts shadow exitPointerLock while they rebuild a menu' },
+  { script: ZOOM, file: 'js/main.js', test: /\bROOM\s*=\s*\(\s*location\.pathname\.match\(\s*\/\^\\\/\(\?:r\|play\)\\\//, why: 'a world\'s path starts /r/ or /play/: inWorld() tests the same prefix before priming' },
+  { script: [OPTIONS, ZOOM], file: 'js/menus.js', test: /\bfunction\s+showScreen\(\s*(\w+)\s*,[^)]*\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,300}?\bif\s*\(\s*\1\s*!==\s*["']inv["']\s*\)\s*\w+\.closeInv\(\)/, why: 'showScreen() closes the inventory for any screen but "inv": why priming is refused while the inventory is open' },
+  { script: ZOOM, file: 'js/menus.js', test: /^(?=[\s\S]*\binner\s*=\s*document\.querySelector\(\s*["']#screen \.inner["']\s*\))(?=[\s\S]*\bfunction\s+showScreen\((?:(?!\bfunction\b)[\s\S]){0,500}?\binner\.replaceChildren\(\s*\.\.\.)(?=[\s\S]*\bfunction\s+closeMenu\(\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,300}?\binner\.replaceChildren\(\s*\))/, why: 'showScreen() and closeMenu() both go through inner.replaceChildren on the one #screen .inner element: the smoke check of localStealFov spies on that call, the only sign of them from outside the module' },
+  { script: OPTIONS, file: 'js/menus.js', test: /^(?![\s\S]*["']pause\.options["'][\s\S]*["']pause\.options["'])/, why: 'the pause menu is the only screen with the pause.options button: prime() recognises the pause menu by that button' },
 
   // --- Chat history
-  { script: [CHAT, OPTIONS], file: 'index.html', test: 'id="chatbox"', why: 'history attaches to the #chatbox input; Better Options reads #chatbox.hidden to tell whether chat is open (F2 is ignored, the benchmark refuses to start, our menu never opens over chat)' },
+  { script: [CHAT, OPTIONS, ZOOM], file: 'index.html', test: 'id="chatbox"', why: 'history attaches to the #chatbox input; Better Options reads #chatbox.hidden to tell whether chat is open (F2 is ignored, the benchmark refuses to start, our menu never opens over chat)' },
   { script: [CHAT, OPTIONS], file: 'index.html', test: /<input\b(?=[^>]*\sid=["']chatbox["'])(?=[^>]*\shidden[\s=/>])[^>]*>/, why: '#chatbox is an <input> (value, setSelectionRange), hidden while chat is closed: a visible #chatbox means chat is open (history, and Better Options\' chatOpen())' },
-  { script: [CHAT, OPTIONS], file: 'js/main.js', test: /^(?=[\s\S]*\b(\w+)\s*=\s*[\w$.]+\(\s*["']#chatbox["']\s*\))(?=[\s\S]*\.chatOpen\s*=\s*true\s*;[^}]*?\b\1\.hidden\s*=\s*false)(?=[\s\S]*\.chatOpen\s*=\s*false\s*;[^}]*?\b\1\.hidden\s*=\s*true)/, why: 'chat opens by setting S.chatOpen = true and then #chatbox.hidden = false, and closes with chatOpen = false and, after resetting its IME and opacity state, hidden = true: chatOpen() reads #chatbox.hidden' },
+  { script: [CHAT, OPTIONS, ZOOM], file: 'js/main.js', test: /^(?=[\s\S]*\b(\w+)\s*=\s*[\w$.]+\(\s*["']#chatbox["']\s*\))(?=[\s\S]*\.chatOpen\s*=\s*true\s*;[^}]*?\b\1\.hidden\s*=\s*false)(?=[\s\S]*\.chatOpen\s*=\s*false\s*;[^}]*?\b\1\.hidden\s*=\s*true)/, why: 'chat opens by setting S.chatOpen = true and then #chatbox.hidden = false, and closes with chatOpen = false and, after resetting its IME and opacity state, hidden = true: chatOpen() reads #chatbox.hidden' },
   { script: CHAT, file: 'js/main.js', test: /\.chatOpen\s*\)\s*\{\s*(?:if\s*\(\s*\w+\(\s*\w+\s*\)\s*\)\s*return\s*;\s*)?if\s*\(\s*\w+\.key\(\s*\w+\s*\)\s*\)\s*\w+\.preventDefault\(\)\s*;\s*else\s+if\s*\(\s*\w+\.key\s*===\s*["']Enter["']\s*\)/, why: 'chat is sent on keydown Enter (recorded first in our capture listener, which skips e.isComposing keys; the game\'s composing() guard also skips keyCode 229); the suggestion list claims keys with preventDefault' },
   { script: CHAT, file: 'js/chat-suggest.js', test: /\.key\s*===\s*["']ArrowUp["']\s*\|\|\s*\w+\.key\s*===\s*["']ArrowDown["']/, why: 'the suggestion list uses Up/Down while shown; history steps aside when the event is defaultPrevented' },
 
@@ -335,6 +348,175 @@ export const runtime = [
       const none = Object.keys(d.classes).filter(k => !(d.classes[k] > 0));
       return none.length === 0 || `no layers classified as ${none.join(', ')}: ${JSON.stringify(d.classes)}`;
     } },
+  { script: SHADERS, name: 'layers >= 256 get their own class: by name, in the class row the GPU reads, and through tcLayer in the terrain and shadow vertex shaders',
+    run: async () => {
+      const T = window.Twitterentary, W = window.__tcwatch;
+      if (!T || typeof T.debug !== 'function') return 'window.Twitterentary.debug missing';
+      if (!W) return 'window.__tcwatch missing: this check reads the sources the smoke recorder kept';
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      await __tcwait(() => T.state.frame > 2);
+      const d = T.debug(), names = d.layerNames, cls = d.layerClasses, bad = [];
+      if (!Array.isArray(names) || !Array.isArray(cls)) return `debug().layerNames/layerClasses are ${JSON.stringify([typeof names, typeof cls])}, expected arrays (one entry per atlas layer)`;
+      if (cls.length !== d.layers) bad.push(`debug().layerClasses has ${cls.length} entries for ${d.layers} atlas layers`);
+      // The GLSL. A 9-bit game has "uint layer = aInfo.x | ..." in its terrain VS; staging is still on plain aInfo.x.
+      const terrain = [...W.programs.values()].filter(p => p.linked && p.vs && /aPos\s*&\s*uvec3/.test(p.vs.source));
+      const game9 = terrain.some(p => /\buint\s+\w+\s*=\s*aInfo\.x\s*\|/.test(p.vs.source));
+      if (d.layerBits !== (game9 ? 9 : 8)) bad.push(`debug().layerBits is ${JSON.stringify(d.layerBits)}, but the game's VS has ${game9 ? 'the 9-bit' : 'the 8-bit'} layer`);
+      const lookups = terrain.filter(p => p.vs.source.includes('uClsTex'));
+      const decl = game9 ? 'int tcLayer = int(aInfo.x | (((aPos.z >> 9u) & 1u) << 8u));' : 'int tcLayer = int(aInfo.x);';
+      const without = lookups.filter(p => !p.vs.source.includes(decl)).length;
+      if (lookups.length < 9) bad.push(`${lookups.length} terrain programs look up uClsTex, expected at least 9 (7 terrain + 2 cutout shadow)`);
+      if (without) bad.push(`${without} of ${lookups.length} programs that read uClsTex lack "${decl}" (the shadow programs read the detection in initGL: if only those lack it, the game no longer links a terrain program first)`);
+      const raw = lookups.filter(p => /texelFetch\(\s*uClsTex\s*,\s*ivec2\(\s*int\(\s*aInfo\.x/.test(p.vs.source)).length;
+      if (raw) bad.push(`${raw} programs still look up the class with int(aInfo.x), the 8-bit layer`);
+      const shadow = lookups.filter(p => p.vs.source.includes('uLVP'));
+      if (shadow.length < 2) bad.push(`${shadow.length} cutout shadow programs, expected 2`);
+      const atlas = shadow.filter(p => !/vUV\s*=\s*vec3\([^;]*float\(\s*tcLayer\s*\)\s*\)\s*;/.test(p.vs.source)).length;
+      if (atlas) bad.push(`${atlas} cutout shadow VS don't take vUV.z from tcLayer: they would sample the wrong atlas layer`);
+      // The class row the VS really reads, read back from unit 7 (between frames; the framebuffer binding is put back).
+      const gl = document.getElementById('gl').getContext('webgl2');
+      const row = () => {
+        const unit = gl.getParameter(gl.ACTIVE_TEXTURE);
+        gl.activeTexture(gl.TEXTURE7);
+        const tex = gl.getParameter(gl.TEXTURE_BINDING_2D);
+        gl.activeTexture(unit);
+        if (!tex) return null;
+        const fb0 = gl.getParameter(gl.FRAMEBUFFER_BINDING), fb = gl.createFramebuffer(), px = new Uint8Array(cls.length * 4);
+        try {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+          if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) return null;
+          gl.readPixels(0, 0, cls.length, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        } finally {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fb0);
+          gl.deleteFramebuffer(fb);
+        }
+        return px;
+      };
+      const off = px => cls.map((c, l) => (px[l * 4] === c ? -1 : l)).filter(l => l >= 0);
+      const matches = () => { const px = row(); return !!px && !off(px).length; };
+      if (!(await __tcwait(matches, 10000))) {
+        const px = row(), wrong = px ? off(px) : [];
+        bad.push(px ? `the class row on unit 7 differs from debug().layerClasses at ${wrong.length} layers, first ${wrong.slice(0, 6).map(l => `${l} ${JSON.stringify(names[l])}: ${px[l * 4]} vs ${cls[l]}`).join(', ')}` : 'could not read the class row back from unit 7');
+      }
+      if (game9) {
+        // Names, not numbers: if the game reorders its atlas this keeps asking the right question. 4 is emissive.
+        const want = { spark_torch: 4, spark_lamp_on: 4, spark_torch_off: 0, spark_lamp: 0 };
+        for (const [n, c] of Object.entries(want)) {
+          const l = names.indexOf(n);
+          if (l < 256) bad.push(`can't verify: "${n}" is on layer ${l}, not on a layer >= 256`);
+          else if (cls[l] !== c) bad.push(`"${n}" (layer ${l}) has class ${cls[l]}, expected ${c}`);
+        }
+        const rails = names.map((n, l) => [n, l]).filter(([n, l]) => l >= 256 && /rail/.test(n));
+        if (!rails.length) bad.push('can\'t verify: no rail on a layer >= 256');
+        for (const [n, l] of rails) if (cls[l] !== 0) bad.push(`"${n}" (layer ${l}) has class ${cls[l]}, expected 0`);
+      }
+      return !bad.length || bad.slice(0, 8).join('; ');
+    } },
+  { script: SHADERS, name: 'a terrain FS for a paged atlas (the game\'s own pagedFS() rewrite) passes through unpatched except for the flat strip, and compiles; the same FS on one page is patched',
+    run: async () => {
+      const T = window.Twitterentary;
+      if (!T || typeof T.debug !== 'function') return 'window.Twitterentary.debug missing';
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      let P;
+      try { P = await import('/js/texpages.js'); } catch (e) { return true; } // a build without texture pages (staging): nothing to fall back from
+      if (typeof P.pagedFS !== 'function') return 'js/texpages.js no longer exports pagedFS';
+      const gl = document.getElementById('gl').getContext('webgl2');
+      // Only the lines our recogniser and patchTerrainFS() look for. Never linked, so the smoke recorder doesn't see it.
+      const FS = ['#version 300 es', 'precision highp float;', 'precision highp sampler2DArray;', 'uniform sampler2DArray uTex;', 'uniform vec3 uFog;',
+        'in vec3 vUV;', 'flat in float vGlass;', 'in float vShade;', 'in float vDist;', 'in vec2 vLight;', 'out vec4 o;', 'void main() {',
+        '  vec4 c = texture(uTex, vUV);', '  float f = clamp(vDist / 100.0, 0.0, 1.0);', '  o = vec4(mix(c.rgb * vShade, uFog, f), c.a);', '}'].join('\n');
+      const paged = P.pagedFS(FS, 'uTex', { pages: 2, size: 256 });
+      if (paged === FS || !/uTex_t\(\s*vUV\s*\)/.test(paged)) return `pagedFS() no longer rewrites texture(uTex, ...) to uTex_t(...): ${JSON.stringify(paged.slice(0, 200))}`;
+      const through = src => {
+        const s = gl.createShader(gl.FRAGMENT_SHADER);
+        try {
+          gl.shaderSource(s, src);
+          gl.compileShader(s);
+          return { src: gl.getShaderSource(s), ok: gl.getShaderParameter(s, gl.COMPILE_STATUS), log: gl.getShaderInfoLog(s) };
+        } finally { gl.deleteShader(s); }
+      };
+      const err0 = T.debug().errors, plain = through(FS), pg = through(paged), bad = [];
+      const stripped = paged.replace(/\bflat\s+in\s+float\s+vGlass\s*;/, 'in float vGlass;');
+      if (!plain.src.includes('dFdx(vRel)')) return `control failed: the one-page FS was not patched, so this check proves nothing (compiled ${plain.ok}: ${String(plain.log).slice(0, 160)})`;
+      if (plain.src.includes('flat ')) bad.push('the patched one-page FS kept its flat varying');
+      if (pg.src !== stripped) bad.push(`the paged FS should reach the GPU as it came, with only flat removed: ${pg.src.includes('dFdx(vRel)') ? 'it was patched' : `it changed: ${JSON.stringify(pg.src.slice(0, 160))}`}`);
+      if (!pg.ok) bad.push(`the paged FS did not compile: ${String(pg.log).slice(0, 200)}`);
+      const err1 = T.debug().errors;
+      if (err1 !== err0) bad.push(`debug().errors went from ${err0} to ${err1}`);
+      return !bad.length || bad.join('; ');
+    } },
+  { script: SHADERS, name: 'the stained-glass depth program (our terrain VS, the game FS) reads uFx = 0 through getUniform, while a patched terrain program reads 1',
+    run: async () => {
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      const T = window.Twitterentary;
+      if (!T || !T.cfg) return 'window.Twitterentary.cfg missing';
+      if (!T.cfg.enabled) return `can't verify: shaders are off (cfg.enabled ${T.cfg.enabled}), so no program would read 1`;
+      const { Gfx } = await import('/js/gfx.js');
+      if (!Gfx || typeof Gfx.prototype.draw !== 'function') return 'js/gfx.js has no Gfx.prototype.draw';
+      // The instance isn't exposed, so catch it on the next frame. The wrapper can't throw on its own account.
+      const draw = Gfx.prototype.draw;
+      let gfx = null;
+      Gfx.prototype.draw = function (v) { gfx = this; return draw.call(this, v); };
+      try { await __tcwait(() => gfx, 10000); } finally { Gfx.prototype.draw = draw; }
+      if (!gfx) return 'Gfx.prototype.draw did not run within 10 s';
+      const gl = gfx.gl, stained = gfx.pStainedDepth, plain = gfx.pTerrain && gfx.pTerrain[0];
+      if (!gl || !stained || !stained.p || !plain || !plain.p) return 'gfx.gl, gfx.pStainedDepth.p or gfx.pTerrain[0].p missing';
+      const read = p => { const loc = gl.getUniformLocation(p, 'uFx'); return loc ? gl.getUniform(p, loc) : null; };
+      // Each program is used through the hook first: the title world may have no stained glass in view, and a program
+      // never used reads 0 whatever the hook would do with it.
+      const prev = gl.getParameter(gl.CURRENT_PROGRAM);
+      let fxPlain, fxStained;
+      try {
+        gl.useProgram(plain.p);
+        fxPlain = read(plain.p);
+        gl.useProgram(stained.p);
+        fxStained = read(stained.p);
+      } finally {
+        gl.useProgram(prev);
+      }
+      if (fxPlain !== 1) return `can't verify: a patched terrain program reads uFx ${JSON.stringify(fxPlain)}, expected 1`;
+      if (fxStained === null) return 'the stained-glass depth program has no active uFx: its VS is no longer our terrain VS';
+      return fxStained === 0 || `the stained-glass depth program reads uFx ${JSON.stringify(fxStained)}: it would wave with no lighting to match`;
+    } },
+  { script: SHADERS, name: 'a flat/smooth vGlass pair that fails to link falls back: both stages end on their pristine source and the program links',
+    run: () => {
+      const gl = document.getElementById('gl') && document.getElementById('gl').getContext('webgl2');
+      if (!gl) return 'no WebGL2 context on #gl';
+      const VS = ['#version 300 es', 'flat out float vGlass;', 'void main() { vGlass = 1.0; gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }'].join(String.fromCharCode(10));
+      // "highp" keeps the real declaration out of the strip's reach, so the stages disagree once the VS is stripped. The
+      // comment does match, which counts this stage as patched too, so both stages have a pristine source to go back to.
+      const FS = ['#version 300 es', 'precision highp float;', '// flat in float vGlass;', 'flat in highp float vGlass;', 'out vec4 o;', 'void main() { o = vec4(vGlass); }'].join(String.fromCharCode(10));
+      const vs = gl.createShader(gl.VERTEX_SHADER), fs = gl.createShader(gl.FRAGMENT_SHADER), p = gl.createProgram();
+      const err = console.error, logged = [], bad = [];
+      try {
+        gl.shaderSource(vs, VS);
+        gl.shaderSource(fs, FS);
+        if (gl.getShaderSource(vs) === VS) return 'the shaderSource hook did not strip "flat out float vGlass;" from the VS';
+        if (gl.getShaderSource(fs) === FS) return 'the shaderSource hook did not touch the FS fixture, so its stage is not patched';
+        gl.compileShader(vs);
+        gl.compileShader(fs);
+        if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS) || !gl.getShaderParameter(fs, gl.COMPILE_STATUS)) return `the fixture did not compile: ${gl.getShaderInfoLog(vs)} ${gl.getShaderInfoLog(fs)}`;
+        gl.attachShader(p, vs);
+        gl.attachShader(p, fs);
+        // The expected console.error, held back from the smoke's console watch for this one synchronous call.
+        console.error = (...a) => { logged.push(a.map(String).join(' ')); };
+        gl.linkProgram(p);
+        console.error = err;
+        if (!logged.some(l => l.includes('failed to link'))) bad.push(`can't verify: the first link did not fail (logged ${JSON.stringify(logged)}), so the fallback never ran`);
+        if (gl.getShaderSource(vs) !== VS) bad.push(`the VS did not go back to its pristine source: ${JSON.stringify(gl.getShaderSource(vs))}`);
+        if (gl.getShaderSource(fs) !== FS) bad.push(`the FS did not go back to its pristine source: ${JSON.stringify(gl.getShaderSource(fs))}`);
+        if (!gl.getProgramParameter(p, gl.LINK_STATUS)) bad.push(`the program did not link after the fallback: ${gl.getProgramInfoLog(p)}`);
+      } catch (e) {
+        bad.push(`threw: ${e.message}`);
+      } finally {
+        console.error = err;
+        gl.deleteProgram(p);
+        gl.deleteShader(vs);
+        gl.deleteShader(fs);
+      }
+      return !bad.length || bad.join('; ');
+    } },
   { script: SHADERS, name: 'the shadow pass replays the recorded terrain chunks',
     run: async () => {
       const T = window.Twitterentary, st = T.state;
@@ -385,13 +567,6 @@ export const runtime = [
           ids.add(p.id);
           for (const k of Object.keys(p.values)) check(`${g}.${p.id}`, k, p.values[k], g);
         }
-      }
-      // 1.5: every Quality preset sets the render-scale rows (Auto), so switching presets never leaves a stale scale.
-      // (Missing rows are reported by the Performance-settings check.)
-      for (const p of F.renderScale ? T.presets.quality || [] : []) {
-        if (!p || !p.values) continue;
-        for (const k of ['renderScale', 'renderScaleMin', 'sharpen']) if (F[k] && !(k in p.values)) bad.push(`quality.${p.id}: does not set ${k}`);
-        if ('renderScale' in p.values && p.values.renderScale !== 0) bad.push(`quality.${p.id}: renderScale = ${JSON.stringify(p.values.renderScale)}, expected 0 (Auto: every preset adapts the resolution)`);
       }
       if (bad.length) return bad.slice(0, 8).join('; ') + (bad.length > 8 ? ` (+${bad.length - 8} more)` : '');
       // The smoke profile is fresh (no tc.shader.* keys), so the live settings are the defaults.
@@ -485,31 +660,59 @@ export const runtime = [
       const q = T.currentPreset('quality'), l = T.currentPreset('look');
       return (q === 'medium' && l === 'natural') || `after reset() the pickers read ${q} / ${l}, expected medium / natural`;
     } },
-  // --- Shaders 1.5: render scale, scene FBO + composite, perf, stress and bench. Settings changes here are made in
-  // memory (T.cfg.x = v, never saved) and put back in `finally`, except bench(), which must restore them itself.
-  { script: SHADERS, name: 'the Performance settings renderScale, renderScaleMin and sharpen have their SCHEMA rows and defaults (Auto, 0.6, 0.5)',
-    run: () => {
+  // --- Shaders 1.5.1: perf, stress and bench. Settings changes here are made in memory (T.cfg.x = v, never saved) and
+  // put back in `finally`, except bench(), which must restore them itself.
+  { script: SHADERS, name: 'renderScale, renderScaleMin and sharpen are gone (schema, defaults, cfg, presets, the Performance section); stale saved values do nothing and a saved 70% profile still reads its preset, not Custom',
+    run: async () => {
       const T = window.Twitterentary;
-      if (!T || !Array.isArray(T.schema) || !T.defaults) return 'window.Twitterentary.schema/defaults missing';
-      const E = 1e-6, bad = [];
-      const want = {
-        renderScale: { type: 'choice', def: 0, options: [[0, 'Auto'], [1, '100%'], [0.9, '90%'], [0.8, '80%'], [0.7, '70%'], [0.6, '60%'], [0.5, '50%']] },
-        renderScaleMin: { type: 'num', def: 0.6, min: 0.5, max: 1, step: 0.05 },
-        sharpen: { type: 'num', def: 0.5, min: 0, max: 1, step: 0.05 },
-      };
-      for (const [k, w] of Object.entries(want)) {
-        const f = T.schema.find(x => x && x.key === k);
-        if (!f) { bad.push(`no SCHEMA row for ${k}`); continue; }
-        if (f.type !== w.type) bad.push(`${k}: type ${JSON.stringify(f.type)}, expected "${w.type}"`);
-        if (f.group !== 'quality') bad.push(`${k}: group ${JSON.stringify(f.group)}, expected "quality" (the Quality presets set it)`);
-        if (f.section !== 'Performance') bad.push(`${k}: section ${JSON.stringify(f.section)}, expected "Performance"`);
-        if (w.options && JSON.stringify(f.options) !== JSON.stringify(w.options)) bad.push(`${k}: options ${JSON.stringify(f.options)}, expected ${JSON.stringify(w.options)}`);
-        for (const p of ['min', 'max', 'step']) if (p in w && !(Math.abs(f[p] - w[p]) < E)) bad.push(`${k}: ${p} ${f[p]}, expected ${w[p]}`);
-        if (typeof T.defaults[k] !== 'number' || !(Math.abs(T.defaults[k] - w.def) < E)) bad.push(`${k}: default ${JSON.stringify(T.defaults[k])}, expected ${w.def}`);
+      if (!T || !Array.isArray(T.schema) || !T.defaults || !T.presets || ['currentPreset', 'applyPreset', 'set', 'reset', 'bench'].some(k => typeof T[k] !== 'function')) return 'window.Twitterentary.schema/defaults/presets/currentPreset/applyPreset/set/reset/bench missing';
+      const GONE = ['renderScale', 'renderScaleMin', 'sharpen'], PFX = 'tc.shader.', bad = [];
+      const saved = () => { const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(PFX)) o[k] = localStorage.getItem(k); } return o; };
+      const cfgNow = () => JSON.stringify(Object.keys(T.cfg).sort().map(k => [k, T.cfg[k]]));
+      for (const k of GONE) {
+        if (T.schema.some(f => f && f.key === k)) bad.push(`${k} still has a SCHEMA row`);
+        if (k in T.defaults) bad.push(`${k} still has a default`);
+        if (k in T.cfg) bad.push(`${k} is still in cfg`);
+        for (const g of ['quality', 'look']) for (const p of T.presets[g] || []) if (p && p.values && k in p.values) bad.push(`${g}.${p.id} still sets ${k}`);
       }
-      return !bad.length || bad.join('; ');
+      if (T.schema.some(f => f && f.section === 'Performance')) bad.push('the Performance section still has rows');
+      if (bad.length) return bad.join('; ');
+      const ls0 = saved(), cfg0 = Object.assign({}, T.cfg), q0 = T.currentPreset('quality'), l0 = T.currentPreset('look');
+      let out = true, left = [];
+      try {
+        // What a 1.5.0 player's profile holds after choosing a fixed 70%. All synchronous up to the bench, which restores.
+        localStorage.setItem(PFX + 'renderScale', '0.7');
+        localStorage.setItem(PFX + 'renderScaleMin', '0.5');
+        localStorage.setItem(PFX + 'sharpen', '1');
+        const c0 = cfgNow(), r = T.set('renderScale', 0.5);
+        if (r !== false) out = `set('renderScale', 0.5) returned ${JSON.stringify(r)}, expected false (no such setting)`;
+        else if (localStorage.getItem(PFX + 'renderScale') !== '0.7') out = `set('renderScale', 0.5) touched the stale key: ${localStorage.getItem(PFX + 'renderScale')}`;
+        else if (cfgNow() !== c0) out = 'set(\'renderScale\', 0.5) changed cfg';
+        else if (T.currentPreset('quality') !== q0 || T.currentPreset('look') !== l0) out = `with stale render-scale keys saved the pickers read ${T.currentPreset('quality')} / ${T.currentPreset('look')}, expected ${q0} / ${l0}`;
+        else {
+          T.applyPreset('quality', 'high');
+          if (T.currentPreset('quality') !== 'high') out = `a saved 70% profile on High reads ${JSON.stringify(T.currentPreset('quality'))}, expected "high", not Custom`;
+        }
+        if (out === true) {
+          // a row naming a removed setting is an n/a row, not a measurement of nothing (it never waits for frames)
+          const res = await T.bench({ seconds: 0.2, warmup: 0, scenarios: ['low+renderScale=0.7'] }), row = res && res.rows && res.rows[0];
+          if (!row || row.fps !== null || !/unknown setting/.test(row.note || '')) out = `the bench scenario low+renderScale=0.7 gave ${JSON.stringify(row)}, expected an n/a row saying "unknown setting"`;
+        }
+      } catch (e) {
+        out = `threw: ${e.message}`;
+      } finally {
+        try {
+          T.reset();
+          left = Object.keys(saved());
+          for (const k of Object.keys(cfg0)) if (T.cfg[k] !== cfg0[k]) T.cfg[k] = cfg0[k];
+          for (const k of left) localStorage.removeItem(k);
+          for (const [k, v] of Object.entries(ls0)) localStorage.setItem(k, v);
+        } catch (e) {}
+      }
+      if (out !== true) return out;
+      return !left.length || `reset() left ${left.join(', ')} in localStorage`;
     } },
-  { script: SHADERS, name: 'Twitterentary.perf has the 1.5 shape, is updated in place, and Auto keeps the scale within [renderScaleMin, 1]',
+  { script: SHADERS, name: 'Twitterentary.perf has the 1.5.1 shape (scale is always 1), is updated in place, and publishes about 4 times a second',
     run: async () => {
       const T = window.Twitterentary;
       if (!T || !T.perf || typeof T.perf !== 'object') return 'window.Twitterentary.perf missing';
@@ -518,6 +721,8 @@ export const runtime = [
       const shape = () => {
         const bad = [];
         for (const k of ['fps', 'ms', 'cpuMs', 'scale', 'shadowRefreshPerMin']) if (!num(P[k])) bad.push(`${k} ${JSON.stringify(P[k])} is not a number`);
+        // tools/bench.mjs needs a numeric perf.scale for its shadow-redraw tail analysis, and an older Better Options shows it
+        if (P.scale !== 1) bad.push(`scale is ${JSON.stringify(P.scale)}, expected exactly 1 (there is no render scale any more)`);
         if (!(P.gpuMs === null || num(P.gpuMs))) bad.push(`gpuMs ${JSON.stringify(P.gpuMs)} is neither a number nor null`);
         for (const k of ['cpuBound', 'timer']) if (typeof P[k] !== 'boolean') bad.push(`${k} ${JSON.stringify(P[k])} is not a boolean`);
         if (P.timer === false && P.gpuMs !== null) bad.push(`gpuMs is ${P.gpuMs} although timer is false (no GPU timer query)`);
@@ -526,125 +731,72 @@ export const runtime = [
       if (!(await __tcwait(() => num(P.fps) && P.fps > 0 && num(P.ms) && P.ms > 0, 15000))) return `perf.fps/ms never became positive numbers: ${JSON.stringify(P)}`;
       let bad = shape();
       if (bad.length) return bad.join('; ');
-      if (T.cfg.renderScale !== 0) return `can't verify Auto: cfg.renderScale is ${JSON.stringify(T.cfg.renderScale)} on a fresh profile, expected 0 (Auto)`;
-      // at least 3 s and 8 frames on Auto (the default; software GL can be very slow): the governor may move the
-      // scale, but only inside its range. The published means (fps, ms, cpuMs, scale) are rewritten together at most
-      // once per 250 ms, at a frame: so they change at least every other frame (on a 1-2 FPS runner every frame
-      // publishes, and cpuMs still moves when no interval is under 1 s), and never more than ~4 times a second.
-      // (perf.frame and the GPU ring change every frame, so they are not compared.) Up to 30 s for 8 frames: a
-      // slow CI runner (SwiftShader at ~1 FPS) still gets there, inside the harness's 90 s per check.
-      const lo = Number(T.cfg.renderScaleMin), t0 = performance.now(), f0 = T.state.frame;
-      const pub = () => `${P.fps}|${P.ms}|${P.cpuMs}|${P.scale}`;
+      // at least 3 s and 8 frames (software GL can be very slow). The published means (fps, ms, cpuMs) are rewritten
+      // together at most once per 250 ms, at a frame: so they change at least every other frame (on a 1-2 FPS runner every
+      // frame publishes, and cpuMs still moves when no interval is under 1 s), and never more than ~4 times a second.
+      // (perf.frame and the GPU ring change every frame, and fpsGame once a second, so they are not compared.) Up to 30 s
+      // for 8 frames: a slow CI runner (SwiftShader at ~1 FPS) still gets there, inside the harness's 90 s per check.
+      const t0 = performance.now(), f0 = T.state.frame;
+      const pub = () => `${P.fps}|${P.ms}|${P.cpuMs}`;
       let changes = 0, last = pub();
       while (performance.now() - t0 < 3000 || (T.state.frame - f0 < 8 && performance.now() - t0 < 30000)) {
         await new Promise(r => setTimeout(r, 100));
         if (T.perf !== P) return 'Twitterentary.perf was replaced by a new object: it must be mutated in place (the overlay and bench keep a reference)';
         const s = pub();
         if (s !== last) { changes++; last = s; }
-        if (!(P.scale >= lo - 1e-6 && P.scale <= 1 + 1e-6)) return `on Auto perf.scale is ${P.scale}, outside [renderScaleMin ${lo}, 1]`;
       }
       bad = shape();
       if (bad.length) return bad.join('; ');
       const frames = T.state.frame - f0, secs = ((performance.now() - t0) / 1000).toFixed(1);
       const brief = () => JSON.stringify(Object.fromEntries(Object.entries(P).filter(([, v]) => !ArrayBuffer.isView(v))));
       if (frames < 4) return `can't verify: only ${frames} frames in ${secs} s (perf ${brief()})`;
-      if (changes < Math.min(3, Math.floor(frames / 2))) return `perf.fps/ms/cpuMs/scale changed only ${changes} times in ${secs} s / ${frames} frames (they should update about 4 times a second): ${brief()}`;
+      if (changes < Math.min(3, Math.floor(frames / 2))) return `perf.fps/ms/cpuMs changed only ${changes} times in ${secs} s / ${frames} frames (they should update about 4 times a second): ${brief()}`;
       const most = Math.floor((performance.now() - t0) / 250) + 1;
-      return changes <= most || `perf.fps/ms/cpuMs/scale changed ${changes} times in ${secs} s / ${frames} frames, more than once per 250 ms (at most ${most}): they should be published about 4 times a second, not every frame: ${brief()}`;
+      return changes <= most || `perf.fps/ms/cpuMs changed ${changes} times in ${secs} s / ${frames} frames, more than once per 250 ms (at most ${most}): they should be published about 4 times a second, not every frame: ${brief()}`;
     } },
-  { script: SHADERS, name: 'at a fixed 70% render scale every frame renders into the scene FBO at ceil(canvas × 0.7) and is composited, following canvas resizes and a regainCanvases()-style reallocation',
+  { script: SHADERS, name: 'perf.fpsGame is the game\'s F3 number: an integer frame count per window over 1000 ms, updated once a second, with shaders on or off',
     run: async () => {
-      const T = window.Twitterentary, c = document.getElementById('gl');
-      if (!T || !T.stats || !T.stats.post || !T.perf || !T.state) return 'window.Twitterentary.stats.post/perf/state missing';
+      const T = window.Twitterentary, P = T && T.perf;
+      if (!P) return 'window.Twitterentary.perf missing';
       if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
-      if (!T.cfg.enabled) return 'can\'t verify: shaders are off by default';
-      const post = T.stats.post, st = T.state, S = 0.7, prev = T.cfg.renderScale, W = c.width, H = c.height;
-      const near = (a, b) => Math.abs(a - b) <= 1;
-      const info = () => `stats.post ${JSON.stringify(post)}, perf.scale ${T.perf.scale}, canvas ${c.width}x${c.height}`;
-      // n more composites, with the scene at the current canvas size × S
-      const follows = async (n, ms) => {
-        const c0 = post.composites;
-        return __tcwait(() => post.ok === true && post.active === true && post.composites >= c0 + n && near(post.w, Math.ceil(c.width * S)) && near(post.h, Math.ceil(c.height * S)), ms);
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      const ok = () => Number.isInteger(P.fpsGame) && P.fpsGame > 0;
+      if (!(await __tcwait(ok, 15000))) return `perf.fpsGame never became a positive integer: ${JSON.stringify(P.fpsGame)} (perf.fps ${P.fps})`;
+      // Our own copy of the game's counter, as main.js frameBody() has it, for three windows.
+      let gf = 0, gT = 0, stop = false, changes = 0, last = P.fpsGame;
+      const mine = [], theirs = [];
+      const tick = ts => {
+        if (stop) return;
+        gf++;
+        if (ts - gT > 1000) { if (gT) { mine.push(gf); theirs.push(P.fpsGame); } gf = 0; gT = ts; }
+        requestAnimationFrame(tick);
       };
-      if (post.ok !== true) return `stats.post.ok is ${JSON.stringify(post.ok)} before the test: the FBO path was turned off after an error`;
-      if (W < 704 || H < 396) return `can't verify: the canvas is ${W}x${H}, too small to test (the FBO is bypassed below 640x360)`;
+      requestAnimationFrame(tick);
+      const t0 = performance.now();
       try {
-        T.cfg.renderScale = S; // in memory only: applies from the next frame, never saved
-        if (!(await follows(3, 20000))) return `with cfg.renderScale = 0.7 the frames were not composited from a ceil(canvas × 0.7) scene: ${info()}`;
-        // (waits below: up to 10-20 s, so a ~1 FPS CI runner gets its frames; each condition holds right after a frame)
-        if (!(await __tcwait(() => post.frame === st.frame, 10000))) return `the last composite was frame ${post.frame}, but the last frame drawn is ${st.frame}: not every frame is composited`;
-        if (!(await __tcwait(() => Math.abs(T.perf.scale - S) < 1e-6, 10000))) return `perf.scale is ${T.perf.scale} at a fixed render scale of 0.7`;
-        // a canvas resize: the FBO must follow canvas.width/height at the next frame viewport
-        c.width = W - 64; c.height = H - 36;
-        if (!(await follows(2, 20000))) return `after resizing the canvas to ${W - 64}x${H - 36} the scene did not follow: ${info()}`;
-        c.width = W; c.height = H;
-        // what gpuwatch's regainCanvases() does when FPS stays low: width to 1 (or 2) and straight back
-        for (let i = 0; i < 2; i++) { const w = c.width; c.width = w > 1 ? 1 : 2; c.width = w; }
-        if (!(await follows(2, 20000))) return `after a regainCanvases()-style reallocation the composite did not recover: ${info()}`;
-        return true;
-      } finally {
-        if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
-        T.cfg.renderScale = prev;
-      }
-    } },
-  { script: SHADERS, name: 'after a composited frame the canvas framebuffer is bound with a full viewport, the GL state is what a direct frame leaves, and the canvas shows the scene',
-    run: async () => {
-      const T = window.Twitterentary, c = document.getElementById('gl');
-      if (!T || !T.stats || !T.stats.post || !T.state) return 'window.Twitterentary.stats.post/state missing';
-      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
-      if (!T.cfg.enabled) return 'can\'t verify: shaders are off by default';
-      const gl = c.getContext('webgl2'), post = T.stats.post, prev = T.cfg.renderScale;
-      if (!gl) return 'no webgl2 context on #gl';
-      // A rAF callback queued now runs after the game's (the game re-arms at the start of its callback), so after the
-      // game's frame and the composite microtask, and before the frame is presented (the drawing buffer is intact).
-      const afterFrame = fn => new Promise(res => requestAnimationFrame(() => { try { res(fn()); } catch (e) { res({ error: e.message }); } }));
-      const read = () => ({
-        fb: gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING), readFb: gl.getParameter(gl.READ_FRAMEBUFFER_BINDING),
-        viewport: [...gl.getParameter(gl.VIEWPORT)].join(','), program: gl.getParameter(gl.CURRENT_PROGRAM),
-        vao: gl.getParameter(gl.VERTEX_ARRAY_BINDING), arrayBuffer: gl.getParameter(gl.ARRAY_BUFFER_BINDING),
-        unit: gl.getParameter(gl.ACTIVE_TEXTURE) - gl.TEXTURE0, tex2d: gl.getParameter(gl.TEXTURE_BINDING_2D), texArray: gl.getParameter(gl.TEXTURE_BINDING_2D_ARRAY),
-        depthTest: gl.isEnabled(gl.DEPTH_TEST), cull: gl.isEnabled(gl.CULL_FACE), blend: gl.isEnabled(gl.BLEND), scissor: gl.isEnabled(gl.SCISSOR_TEST),
-        depthMask: gl.getParameter(gl.DEPTH_WRITEMASK), colorMask: [...gl.getParameter(gl.COLOR_WRITEMASK)].join(','), depthFunc: gl.getParameter(gl.DEPTH_FUNC),
-        blendFunc: [gl.BLEND_SRC_RGB, gl.BLEND_DST_RGB, gl.BLEND_SRC_ALPHA, gl.BLEND_DST_ALPHA].map(k => gl.getParameter(k)).join(','),
-        _composited: post.active === true && post.frame === T.state.frame, _w: c.width, _h: c.height,
-      });
-      // mean colour of the lower and upper half of the centre quarter (readPixels rows go bottom-up)
-      const image = () => {
-        const rw = c.width >> 1, rh = c.height >> 1, px = new Uint8Array(rw * rh * 4);
-        gl.readPixels((c.width - rw) >> 1, (c.height - rh) >> 1, rw, rh, gl.RGBA, gl.UNSIGNED_BYTE, px);
-        const mean = (y0, y1) => { const s = [0, 0, 0]; let n = 0; for (let y = y0; y < y1; y += 2) for (let x = 0; x < rw; x += 2) { const i = (y * rw + x) * 4; s[0] += px[i]; s[1] += px[i + 1]; s[2] += px[i + 2]; n++; } return s.map(v => Math.round(v / n)); };
-        return { low: mean(0, rh >> 1), high: mean(rh >> 1, rh) };
-      };
-      const ids = [], name = v => v === null ? 'null' : typeof v === 'object' ? `${v.constructor.name}#${(ids.indexOf(v) + 1) || ids.push(v)}` : JSON.stringify(v);
-      try {
-        T.cfg.renderScale = 1; // direct: no FBO
-        // one frame each: 20 s covers a ~1 FPS CI runner (the waits end as soon as the frame is drawn)
-        if (!(await __tcwait(() => post.active === false, 20000))) return `can't verify: at cfg.renderScale = 1 stats.post.active stays ${post.active} (expected a direct frame)`;
-        await afterFrame(() => 0);
-        const d = [await afterFrame(() => ({ s: read(), img: image() })), await afterFrame(() => ({ s: read() }))];
-        T.cfg.renderScale = 0.7;
-        if (!(await __tcwait(() => post.active === true && post.ok === true, 20000))) return `with cfg.renderScale = 0.7 the FBO path never became active: ${JSON.stringify(post)}`;
-        await afterFrame(() => 0);
-        const p = [await afterFrame(() => ({ s: read(), img: image() })), await afterFrame(() => ({ s: read() }))];
-        const err = [...d, ...p].find(x => x.error);
-        if (err) return `reading the GL state threw: ${err.error}`;
-        const bad = [];
-        for (const [i, x] of p.entries()) {
-          if (!x.s._composited) bad.push(`frame ${i + 1} was not composited (stats.post ${JSON.stringify(post)})`);
-          if (x.s.fb !== null || x.s.readFb !== null) bad.push(`frame ${i + 1}: framebuffer ${name(x.s.fb)} / read ${name(x.s.readFb)} is bound after the composite, expected the canvas (null)`);
-          if (x.s.viewport !== `0,0,${x.s._w},${x.s._h}`) bad.push(`frame ${i + 1}: viewport ${x.s.viewport} after the composite, expected 0,0,${x.s._w},${x.s._h}`);
+        while (mine.length < 3 && performance.now() - t0 < 30000) {
+          await sleep(50);
+          if (P.fpsGame !== last) {
+            changes++; last = P.fpsGame;
+            if (!Number.isInteger(last)) return `perf.fpsGame became ${JSON.stringify(last)}: it counts frames, so it is an integer (perf.fps is the mean)`;
+          }
         }
-        // compare only what is stable between the two direct frames (the title camera turns, but the draw order is fixed)
-        const keys = Object.keys(d[0].s).filter(k => !k.startsWith('_'));
-        const unstable = keys.filter(k => d[0].s[k] !== d[1].s[k]);
-        for (const k of keys) if (!unstable.includes(k)) for (const [i, x] of p.entries()) if (x.s[k] !== d[0].s[k]) bad.push(`frame ${i + 1}: ${k} is ${name(x.s[k])} after the composite, ${name(d[0].s[k])} after a direct frame`);
-        if (bad.length) return [...new Set(bad)].slice(0, 8).join('; ') + (unstable.length ? ` (not compared, unstable between direct frames: ${unstable.join(', ')})` : '');
-        const a = d[0].img, b = p[0].img, dark = v => v[0] + v[1] + v[2] < 24;
-        if (dark(b.low) && dark(b.high)) return `the composited canvas is black (centre means ${JSON.stringify(b)}; direct frame ${JSON.stringify(a)})`;
-        const off = ['low', 'high'].filter(h => a[h].some((v, i) => Math.abs(v - b[h][i]) > 40));
-        return !off.length || `the composited canvas does not look like the direct frame (centre-quarter means, lower/upper half): direct ${JSON.stringify(a)}, composited ${JSON.stringify(b)}`;
+      } finally { stop = true; }
+      const secs = (performance.now() - t0) / 1000;
+      if (mine.length < 3) return `can't verify: ${mine.length} one-second windows in ${secs.toFixed(1)} s`;
+      if (changes > Math.ceil(secs) + 1) return `perf.fpsGame changed ${changes} times in ${secs.toFixed(1)} s, more than once a second: the game's number changes only when its window closes`;
+      // Acceptance is 1 FPS apart at a steady rate, which only a real GPU has. Software GL frames are uneven and the two
+      // windows are out of phase, so here the median gap may be 2 frames or a fifth: enough to catch a different window.
+      const gaps = mine.map((m, i) => Math.abs(m - theirs[i])).sort((a, b) => a - b), most = Math.max(2, Math.ceil(Math.max(...mine) / 5));
+      if (gaps[1] > most) return `perf.fpsGame read ${theirs.join(', ')} while the game's formula gave ${mine.join(', ')}: more than ${most} apart`;
+      // F2 must still count with the shaders off (K), when the game's own number certainly does
+      const was = T.cfg.enabled;
+      try {
+        T.cfg.enabled = false; // in memory only
+        P.fpsGame = 0;
+        return (await __tcwait(ok, 15000)) || `with shaders off perf.fpsGame stayed ${JSON.stringify(P.fpsGame)} for 15 s`;
       } finally {
-        T.cfg.renderScale = prev;
+        T.cfg.enabled = was;
       }
     } },
   { script: SHADERS, name: 'stress({ shadowRefreshEvery }) forces shadow refreshes in memory only, and stress({}) turns it off',
@@ -694,12 +846,18 @@ export const runtime = [
         // a saved non-default value, so "restored" covers an existing key as well as the keys a preset would add
         T.set('saturation', 1.1);
         const lsB = JSON.stringify(saved()), cfgB = cfgNow();
-        // The second scenario has a fixed scale, so its row must read exactly 0.7: a row averaged over the frames of
-        // earlier rows too (a recorder field not reset between scenarios) reads less. On a slow runner bench() itself
-        // extends each window until 3 frames (at most 5 s more), so rows have numbers down to ~0.2 FPS.
-        const SC = ['off', 'low+renderScale=0.7'], fixedOk = !!(T.stats && T.stats.post && T.stats.post.ok === true);
-        const p1 = T.bench({ seconds: 0.5, warmup: 0.2, scenarios: SC });
+        // Each row must be measured on its own frames. A render scale can no longer tell rows apart, so the first row gets
+        // something the second must not show: one stall (its worst interval) and forced shadow redraws, against `off`, which
+        // redraws nothing. A recorder field not reset between scenarios carries them over: a stale dt list keeps the stall in
+        // row 2's low1, a stale dtSum lifts its mean above its worst interval, a stale ref0 gives it redraws, a stale scale
+        // sum reads above 1. On a slow runner bench() itself extends each window until 3 frames (at most 5 s more), so rows
+        // have numbers down to ~0.2 FPS.
+        const SC = ['medium-stress', 'off'], STALL = 1500, SECONDS = 4;
+        const p1 = T.bench({ seconds: SECONDS, warmup: 0.2, scenarios: SC });
         const running = T.bench.running;
+        // A rAF callback that blocks, just after the first window opens (warm-up + the 0.5 s settle), so the interval
+        // that holds it is measured even at ~1 FPS. BREC_MAX_MS drops intervals of 5 s and over.
+        setTimeout(() => requestAnimationFrame(() => { const t = performance.now(); while (performance.now() - t < STALL); }), 800);
         const p2 = T.bench({ seconds: 0.5, warmup: 0.2, scenarios: ['off'] });
         const second = p2 && typeof p2.then === 'function' ? await p2.then(() => 'resolved', e => `rejected (${e && e.message})`) : `returned ${typeof p2}, not a Promise`;
         let res;
@@ -716,12 +874,17 @@ export const runtime = [
           for (const r of rows) {
             if (!(num(r.fps) && r.fps > 0 && num(r.ms) && r.ms > 0)) bad.push(`row ${r.name}: fps ${r.fps}, ms ${r.ms} should be positive numbers`);
             else if (Math.abs(r.fps * r.ms - 1000) > 10) bad.push(`row ${r.name}: fps ${r.fps} x ms ${r.ms} is not 1000 (fps should be 1000 / the mean frame ms)`);
-            for (const k of ['p95', 'low1', 'cpuMs', 'gpuMs', 'scale']) if (!(r[k] === null || num(r[k]))) bad.push(`row ${r.name}: ${k} ${JSON.stringify(r[k])} is neither a number nor null`);
+            for (const k of ['p95', 'low1', 'cpuMs', 'gpuMs']) if (!(r[k] === null || num(r[k]))) bad.push(`row ${r.name}: ${k} ${JSON.stringify(r[k])} is neither a number nor null`);
+            if (r.scale !== 1) bad.push(`row ${r.name}: scale ${JSON.stringify(r.scale)}, expected exactly 1 (more means the scale sum was not reset between scenarios)`);
+            if (num(r.ms) && num(r.low1) && r.ms > 1000 / r.low1 + 0.01) bad.push(`row ${r.name}: mean ${r.ms} ms is above its worst interval ${(1000 / r.low1).toFixed(3)} ms (low1 ${r.low1}): the mean holds frames of another row`);
           }
           if ('aborted' in res) bad.push(`a bench that ran to the end has aborted: ${JSON.stringify(res.aborted)} (only an aborted one should)`);
-          if (rows[0].scale !== 1) bad.push(`row off: scale ${JSON.stringify(rows[0].scale)}, expected 1 (shaders off render directly)`);
-          if (fixedOk && !(Math.abs(rows[1].scale - 0.7) < 0.005)) bad.push(`row ${SC[1]}: scale ${JSON.stringify(rows[1].scale)}, expected 0.7 (a fixed render scale; less means the row was averaged over the frames of other rows too)`);
+          const [a, b] = rows, worst = Math.max(1, Math.ceil(SECONDS * 1000 / a.ms / 100)); // low1 is the mean of the worst 1% of a row's intervals
+          if (!(a.low1 <= worst * 1000 / STALL * 1.02)) bad.push(`can't verify: the ${STALL} ms stall is not in row ${a.name}: low1 ${a.low1} at ${a.ms} ms a frame`);
+          else if (!(b.low1 > a.low1 * 1.2)) bad.push(`row ${b.name}: low1 ${b.low1} against ${a.low1} in row ${a.name}: its worst interval looks like the stall from the row before, so the intervals were not reset`);
+          if (b.refreshPerMin !== 0) bad.push(`row ${b.name}: refreshPerMin ${JSON.stringify(b.refreshPerMin)}, expected 0 with shaders off (row ${a.name} read ${a.refreshPerMin})`);
         }
+        if (T.debug().stress.mode !== 'off') bad.push(`debug().stress is ${JSON.stringify(T.debug().stress)} after the bench, expected mode "off"`);
         if (JSON.stringify(saved()) !== lsB) bad.push(`tc.shader.* localStorage changed: before ${lsB}, after ${JSON.stringify(saved())}`);
         if (cfgNow() !== cfgB) { const b = JSON.parse(cfgB); bad.push(`cfg not restored: ${b.filter(([k, v]) => T.cfg[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(T.cfg[k])} (was ${JSON.stringify(v)})`).join(', ')}`); }
         if (bad.length) out = bad.slice(0, 8).join('; ');
@@ -744,7 +907,7 @@ export const runtime = [
       if (!T || typeof T.bench !== 'function' || typeof T.set !== 'function' || typeof T.reset !== 'function' || typeof T.stress !== 'function') return 'window.Twitterentary.bench/set/reset/stress missing';
       if (typeof T.bench.abort !== 'function') return 'Twitterentary.bench.abort missing (Better Options stops a run on Escape with it)';
       if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
-      const PFX = 'tc.shader.', E = 1e-6;
+      const PFX = 'tc.shader.';
       const saved = () => { const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(PFX)) o[k] = localStorage.getItem(k); } return o; };
       const cfgNow = () => JSON.stringify(Object.keys(T.cfg).sort().map(k => [k, T.cfg[k]]));
       const stressNow = () => { const s = T.debug().stress || {}; return `${s.shadowRefreshEvery}|${s.moveSpeed}`; };
@@ -764,14 +927,14 @@ export const runtime = [
         if (idle !== false) bad.push(`abort() with no bench running returned ${JSON.stringify(idle)}, expected false`);
         T.set('saturation', 1.1); // a saved non-default value, so "restored" also covers an existing key
         const lsB = JSON.stringify(saved()), cfgB = cfgNow(), stB = stressNow();
-        // Abort during the second scenario, which differs visibly (shaders on, a fixed 70% scale, the -moving
+        // Abort during the second scenario, which differs visibly (shaders on, Low's shadows off, the -moving
         // drift), so abort() must undo in-memory CFG and stress() too. 3 s windows leave time to land inside it.
-        const SC = ['off', 'low+renderScale=0.7-moving'];
+        const SC = ['off', 'low-moving'];
         const tr = track(T.bench({ seconds: 3, warmup: 0.2, scenarios: SC }));
-        const inSecond = () => T.cfg.enabled === true && Math.abs(T.cfg.renderScale - 0.7) < E && T.debug().stress.moveSpeed > 0;
+        const inSecond = () => T.cfg.enabled === true && T.cfg.shadows === false && T.debug().stress.moveSpeed > 0;
         const t0 = performance.now();
         while (!tr.done && !inSecond() && performance.now() - t0 < 40000) await sleep(50);
-        if (tr.done || !inSecond()) bad.push(`can't verify: the second scenario never started (bench ${tr.done ? 'already settled' : 'still running'}, cfg.enabled ${T.cfg.enabled}, renderScale ${T.cfg.renderScale}, stress ${JSON.stringify(T.debug().stress)})`);
+        if (tr.done || !inSecond()) bad.push(`can't verify: the second scenario never started (bench ${tr.done ? 'already settled' : 'still running'}, cfg.enabled ${T.cfg.enabled}, shadows ${T.cfg.shadows}, stress ${JSON.stringify(T.debug().stress)})`);
         else {
           // K (the shader toggle) is ignored while a bench runs: it would save enabled and skew the row
           const k = key();
@@ -830,33 +993,25 @@ export const runtime = [
       }
       return out;
     } },
-  { script: SHADERS, name: 'debug() counts remeshes (a non-negative integer that never goes down) and the governor\'s refresh estimate, and no VAO is left bound after a frame (remeshes run between frames under the VAO the last frame left)',
+  { script: SHADERS, name: 'debug() counts remeshes (a non-negative integer that never goes down) and has no post or governor data, and no VAO is left bound after a frame (remeshes run between frames under the VAO the last frame left)',
     run: async () => {
       const T = window.Twitterentary;
       if (!T || typeof T.debug !== 'function') return 'window.Twitterentary.debug missing';
       if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
       const c = document.getElementById('gl'), gl = c && c.getContext('webgl2');
       if (!gl) return 'no webgl2 context on #gl';
-      const bad = [], prev = T.cfg.renderScale;
+      const bad = [];
       const d0 = T.debug(), r0 = d0.remeshes;
       if (!Number.isInteger(r0) || r0 < 0) return `debug().remeshes is ${JSON.stringify(r0)}, expected a non-negative integer`;
-      const g = d0.governor;
-      if (!g || typeof g.refreshMs !== 'number' || !Number.isFinite(g.refreshMs) || !(g.refreshMs > 0)) bad.push(`debug().governor.refreshMs is ${JSON.stringify(g && g.refreshMs)}, expected a positive number of ms (the display refresh estimate)`);
-      // A rAF callback queued now runs after the game's frame (and our composite), before the next frame's
-      // updateChunks() remeshes. The bindBuffer hook pairs a VBO with the VAO bound at its first bind, so a VAO
-      // left bound here would be the one a newly created VBO gets paired with, if the game ever bound it first.
+      for (const k of ['post', 'governor']) if (k in d0) bad.push(`debug().${k} is still there: the render-scale code it reports is gone`);
+      // A rAF callback queued now runs after the game's frame, before the next frame's updateChunks() remeshes. The
+      // bindBuffer hook pairs a VBO with the VAO bound at its first bind, so a VAO left bound here would be the one a
+      // newly created VBO gets paired with, if the game ever bound it first.
       const afterFrame = () => new Promise(res => requestAnimationFrame(() => { try { res(gl.getParameter(gl.VERTEX_ARRAY_BINDING)); } catch (e) { res(e); } }));
-      try {
-        for (const [s, what] of [[1, 'a direct frame (renderScale 1)'], [0.7, 'a composited frame (renderScale 0.7)']]) {
-          T.cfg.renderScale = s; // in memory only
-          await afterFrame();
-          const v = [await afterFrame(), await afterFrame()];
-          if (v.some(x => x instanceof Error)) bad.push(`reading VERTEX_ARRAY_BINDING threw: ${v.find(x => x instanceof Error).message}`);
-          else if (v.some(x => x !== null)) bad.push(`a VAO is still bound after ${what}`);
-        }
-      } finally {
-        T.cfg.renderScale = prev;
-      }
+      await afterFrame();
+      const v = [await afterFrame(), await afterFrame()];
+      if (v.some(x => x instanceof Error)) bad.push(`reading VERTEX_ARRAY_BINDING threw: ${v.find(x => x instanceof Error).message}`);
+      else if (v.some(x => x !== null)) bad.push('a VAO is still bound after a frame');
       const r1 = T.debug().remeshes;
       if (!Number.isInteger(r1) || r1 < r0) bad.push(`debug().remeshes went from ${r0} to ${JSON.stringify(r1)}`);
       return !bad.length || bad.join('; ');
@@ -937,12 +1092,15 @@ export const runtime = [
           const n = '(?:\\d+(?:\\.\\d+)?|--)', bad = [];
           if (!new RegExp(`^${n} FPS · ${n} ms$`).test(line('fps') || '')) bad.push(`fps line "${line('fps')}"`);
           if (!new RegExp(`^CPU ${n} ms · GPU (?:${n} ms|n/a)$`).test(line('cpu') || '')) bad.push(`cpu line "${line('cpu')}"`);
-          const sc = /^Scale (\d+|--)% \((Auto|Fixed|Off)\)$/.exec(line('scale') || '');
-          const want = T.cfg.enabled === false ? 'Off' : T.cfg.renderScale === 0 ? 'Auto' : 'Fixed';
-          if (!sc) bad.push(`scale line "${line('scale')}"`);
-          else if (sc[2] !== want) bad.push(`scale line says (${sc[2]}), expected (${want})`);
-          else if (sc[1] !== '--' && Math.abs(Number(sc[1]) - T.perf.scale * 100) > 5) bad.push(`scale line says ${sc[1]}% but perf.scale is ${T.perf.scale}`);
+          // 1.5.1: there is no render scale, so no Scale line
+          if (el().querySelector('[data-l="scale"]')) bad.push('the overlay still has a Scale line');
           if (!/^Shadows (\d+\/min|off)$/.test(line('shadow') || '')) bad.push(`shadow line "${line('shadow')}"`);
+          // The FPS line shows perf.fpsGame when it is finite and > 0, else perf.fps. Written until the 250 ms poll shows it,
+          // because the shader script rewrites the field each time its one-second window closes.
+          const P = T.perf, shown = () => parseFloat(line('fps') || '');
+          const hold = async (v, test) => { const t0 = performance.now(); while (performance.now() - t0 < 4000) { P.fpsGame = v; await new Promise(r => setTimeout(r, 50)); if (test()) return true; } return false; };
+          if (!(await hold(98765, () => shown() === 98765))) bad.push(`fps line "${line('fps')}" never showed perf.fpsGame = 98765: F2 would not match F3`);
+          else if (!(await hold(0, () => shown() !== 98765 && Math.abs(shown() - P.fps) <= Math.max(1, P.fps / 5)))) bad.push(`with perf.fpsGame = 0 the fps line "${line('fps')}" did not fall back to perf.fps ${P.fps}`);
           if (bad.length) out = `the overlay text does not match its format: ${bad.join('; ')}`;
         } else if (!/No performance data/.test(line('fps') || '')) out = `without Twitterentary.perf the overlay should say "No performance data", it says "${line('fps')}"`;
         press();
@@ -951,6 +1109,81 @@ export const runtime = [
         if (bus.get('perf.overlay')) bus.set('perf.overlay', false);
       }
       return out;
+    } },
+  // --- Better Options 1.3: "Copy all settings". Secrets are planted by name, never read: this check only writes and
+  // removes them, in one synchronous block, so no game code can run while a fake value exists. The names are built by
+  // concatenation so they appear nowhere in this repo as text.
+  { script: OPTIONS, name: 'bus.settingsText() is the agreed JSON and holds none of the forbidden keys (planted fake values), nothing else from localStorage, and no stale zoomed FOV',
+    run: async () => {
+      const bus = window.__tcOptions, T = window.Twitterentary, Z = window.__tcZoom;
+      if (!bus || typeof bus.settingsText !== 'function') return 'window.__tcOptions.settingsText missing';
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      const FAKE = 'tcfake' + Math.random().toString(36).slice(2, 10), PFX = 'tc.shader.', OPT = 'tc.options';
+      const has = k => { for (let i = 0; i < localStorage.length; i++) if (localStorage.key(i) === k) return true; return false; };
+      const SECRET = ['mc.' + 'tok', 'mc.' + 'adm' + 'in', 'mc.' + 'key.' + 'tcfake' + 'room'];
+      const IDENTITY = ['sid', 'nonce', 'bridged', 'wardrobe', 'cos', 'hotbar', 'recent'].map(k => 'mc.' + k);
+      const OTHER = ['mc.tcplanted', 'tcplanted', 'tc.chat.tcplanted']; // nothing iterates mc.* or localStorage
+      // A secret the game really holds stays untouched and unread: only its absence from the text can be judged.
+      const planted = SECRET.filter(k => !has(k));
+      const keep = {};
+      for (const k of [...IDENTITY, ...OTHER, 'mc.fov', OPT]) keep[k] = localStorage.getItem(k);
+      const cfg = bus.config && typeof bus.config === 'object' ? bus.config : null, EXTRA = 'tcplanted.identity';
+      let text, staleFov, threw = null;
+      try {
+        for (const k of [...planted, ...IDENTITY, ...OTHER]) localStorage.setItem(k, FAKE);
+        localStorage.setItem(PFX + 'tcprobe', '1.5');
+        // a key some other mod saved in tc.options: only the allow-listed names may come through
+        if (cfg) cfg[EXTRA] = FAKE;
+        let o = {};
+        try { o = JSON.parse(keep[OPT] || '{}') || {}; } catch (e) {}
+        o[EXTRA] = FAKE;
+        localStorage.setItem(OPT, JSON.stringify(o));
+        text = bus.settingsText();
+        localStorage.setItem('mc.fov', '17.5'); // a reload while zoomed could leave this: the game itself ignores it
+        if (!(Z && Z.zooming)) staleFov = JSON.parse(bus.settingsText()).game.fov;
+      } catch (e) {
+        threw = e;
+      } finally {
+        for (const k of planted) localStorage.removeItem(k);
+        localStorage.removeItem(PFX + 'tcprobe');
+        if (cfg) delete cfg[EXTRA];
+        for (const [k, v] of Object.entries(keep)) { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); }
+      }
+      const stillThere = planted.filter(has);
+      if (stillThere.length) return `the planted keys were not cleaned up: ${stillThere.length}`;
+      if (threw) return `settingsText() threw: ${threw.message}`;
+      if (typeof text !== 'string') return `settingsText() returned ${text && typeof text.then === 'function' ? 'a Promise: it must be synchronous' : typeof text}`;
+      const bad = [];
+      if (text.includes(FAKE)) bad.push('a planted fake value is in the output');
+      const named = SECRET.filter(k => text.includes(k)).length, others = [...IDENTITY, ...OTHER].filter(k => text.includes(k));
+      if (named) bad.push(`${named} secret key name(s) are in the output`);
+      if (others.length) bad.push(`these key names are in the output: ${others.join(', ')}`);
+      if (text.includes(EXTRA)) bad.push('a key outside the tc.options allow-list came through');
+      let d;
+      try { d = JSON.parse(text); } catch (e) { return `settingsText() is not JSON: ${e.message}`; }
+      if (!text.includes('\n')) bad.push('settingsText() is not pretty-printed');
+      const keysAre = (o, want, what) => { const got = o && typeof o === 'object' ? Object.keys(o).sort().join() : String(o); if (got !== [...want].sort().join()) bad.push(`${what} has keys ${got}, expected ${[...want].sort().join()}`); };
+      keysAre(d, ['tweetcraftSettings', 'scripts', 'gpu', 'screen', 'game', 'shaders', 'options'], 'the output');
+      if (d.tweetcraftSettings !== 1) bad.push(`tweetcraftSettings is ${JSON.stringify(d.tweetcraftSettings)}, expected 1`);
+      keysAre(d.scripts, ['shaders', 'betterOptions', 'zoom', 'chatHistory'], 'scripts');
+      keysAre(d.game, ['rd', 'fov', 'heldLight', 'fireflies', 'lang'], 'game');
+      keysAre(d.screen, ['w', 'h', 'dpr'], 'screen');
+      const S = d.scripts || {};
+      if (S.shaders !== (T ? String(T.version) : null)) bad.push(`scripts.shaders is ${JSON.stringify(S.shaders)}, expected ${JSON.stringify(T ? String(T.version) : null)} (null when not loaded)`);
+      if (S.zoom !== (Z ? String(Z.version) : null)) bad.push(`scripts.zoom is ${JSON.stringify(S.zoom)}, expected ${JSON.stringify(Z ? String(Z.version) : null)} (null when not loaded)`);
+      if (typeof S.betterOptions !== 'string' || !S.betterOptions) bad.push(`scripts.betterOptions is ${JSON.stringify(S.betterOptions)}`);
+      if ((S.chatHistory === null) !== !window.__mcChatHistory) bad.push(`scripts.chatHistory is ${JSON.stringify(S.chatHistory)} with __mcChatHistory ${window.__mcChatHistory ? 'loaded' : 'absent'}`);
+      if (!(d.gpu === null || typeof d.gpu === 'string')) bad.push(`gpu is ${JSON.stringify(d.gpu)}`);
+      const G = d.game || {};
+      if (typeof G.rd !== 'number' || typeof G.fov !== 'number' || typeof G.heldLight !== 'boolean') bad.push(`game is ${JSON.stringify(G)}: rd and fov should be numbers, heldLight a boolean`);
+      if (!(G.fov >= 30 && G.fov <= 110)) bad.push(`game.fov is ${JSON.stringify(G.fov)}, outside the game's 30-110`);
+      if (!Z || !Z.zooming) { if (!(staleFov >= 30 && staleFov <= 110)) bad.push(`with mc.fov = 17.5 stored game.fov reads ${JSON.stringify(staleFov)}: a zoomed FOV must never be reported`); }
+      if (!d.shaders || d.shaders.tcprobe !== 1.5) bad.push(`shaders.tcprobe is ${JSON.stringify(d.shaders && d.shaders.tcprobe)}: every tc.shader.* key should be there with its prefix stripped`);
+      if (T) for (const f of T.schema) if (f && f.key && !(d.shaders && f.key in d.shaders)) { bad.push(`shaders has no ${f.key}`); break; }
+      const ALLOW = ['ui.scale', 'hud.on', 'input.sens', 'keys.map', 'keys.mute', 'perf.overlay', 'perf.key', 'zoom.key', 'zoom.level', 'zoom.look'];
+      const extra = Object.keys(d.options || {}).filter(k => !ALLOW.includes(k));
+      if (!d.options || extra.length) bad.push(`options has keys outside the allow-list: ${extra.join(', ') || String(d.options)}`);
+      return !bad.length || bad.slice(0, 8).join('; ');
     } },
   { script: CHAT, name: 'window.__mcChatHistory is available',
     run: () => !!window.__mcChatHistory || 'window.__mcChatHistory missing' },
@@ -1099,6 +1332,47 @@ export const runtime = [
       }
       return out;
     } },
+  { script: OPTIONS, name: 'bus.fov.setNow() writes at once when the input is cached and otherwise does nothing, and neither it nor prime() touches the title screen',
+    run: async () => {
+      const M = await import('/js/menus.js');
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      const bus = window.__tcOptions;
+      if (!bus || !bus.fov || ['get', 'set', 'setNow', 'prime', '_forget'].some(k => typeof bus.fov[k] !== 'function')) return 'window.__tcOptions.fov.get/set/setNow/prime/_forget missing';
+      const scr = document.getElementById('screen'), before = scr.className, prev = localStorage.getItem('mc.fov');
+      const marker = () => !!document.querySelector('#screen .inner .tc-marker');
+      const look = () => `${scr.className}|${[...document.querySelectorAll('#screen .inner button')].map(b => b.getAttribute('aria-label')).join('|')}`;
+      const bad = [], look0 = look();
+      let opened = false;
+      try {
+        bus.fov._forget();
+        const r0 = bus.fov.setNow(83);
+        if (r0 !== false) bad.push(`with no cached input setNow() returned ${JSON.stringify(r0)}, expected false`);
+        if (localStorage.getItem('mc.fov') !== prev) bad.push(`with no cached input setNow() wrote mc.fov = ${localStorage.getItem('mc.fov')}`);
+        if (look() !== look0) bad.push('setNow() changed the screen');
+        const p = await bus.fov.prime();
+        if (p !== false) bad.push(`prime() over the title resolved ${JSON.stringify(p)}, expected false: the title is never primed`);
+        if (look() !== look0) bad.push(`prime() changed the title screen: ${look()}`);
+        // our own menu fills the cache through the old path
+        await bus.open();
+        opened = true;
+        if (!(await __tcwait(marker, 5000))) return `menu not shown (#screen class "${scr.className}")`;
+        await new Promise(r => setTimeout(r, 300));
+        const look1 = look(), r1 = bus.fov.setNow(83), now = localStorage.getItem('mc.fov');
+        if (r1 !== true) bad.push(`with a cached input setNow() returned ${JSON.stringify(r1)}, expected true`);
+        if (now !== '83') bad.push(`setNow(83) left mc.fov = ${JSON.stringify(now)} in the same tick: the game's slider handler should have saved it`);
+        if (bus.fov.get() !== 83) bad.push(`after setNow(83) bus.fov.get() is ${bus.fov.get()}`);
+        if (look() !== look1) bad.push('setNow() rebuilt the screen');
+        if ((await bus.fov.prime()) !== true) bad.push('prime() with a cached input should resolve true');
+      } catch (e) {
+        bad.push(`threw: ${e.message}`);
+      } finally {
+        try { bus.fov.setNow(prev === null ? 70 : Number(prev)); } catch (e) {}
+        if (prev === null) localStorage.removeItem('mc.fov'); else localStorage.setItem('mc.fov', prev);
+        if (opened) { if (before) M.back(); else M.closeMenu(); }
+      }
+      if (look() !== look0) bad.push(`the screen was not restored: ${look()}`);
+      return !bad.length || bad.join('; ');
+    } },
   { script: OPTIONS, name: 'the Graphics tab toggles the performance overlay, and the Shaders tab offers "Run benchmark" and shows the last result with "Copy results"',
     run: async () => {
       const M = await import('/js/menus.js');
@@ -1143,15 +1417,23 @@ export const runtime = [
             if (!document.querySelector('#screen .inner .tc-bench .tc-bench-head')) issues.push('Shaders tab: no .tc-bench-head in the stored result');
             if (rows.length !== 2) issues.push(`Shaders tab: ${rows.length} .tc-bench-row for a stored result with 2 rows`);
             else {
-              // cells: name (shown capitalised, the raw name in its title), FPS, p95 ms, scale
+              // cells: name (shown capitalised, the raw name in its title), FPS, p95 ms
               const cells = [...rows[0].children].filter(x => x.tagName === 'SPAN'), first = cells[0];
               const raw = first ? (first.getAttribute('title') || '').split(':')[0].trim() : '';
-              if (cells.length !== 4 || raw !== 'off' || first.textContent.trim().toLowerCase() !== 'off') issues.push(`the first .tc-bench-row has cells ${JSON.stringify(cells.map(x => x.textContent.trim()))} (title ${JSON.stringify(first && first.getAttribute('title'))}), expected 4 spans starting with the scenario "off"`);
+              if (cells.length !== 3 || raw !== 'off' || first.textContent.trim().toLowerCase() !== 'off') issues.push(`the first .tc-bench-row has cells ${JSON.stringify(cells.map(x => x.textContent.trim()))} (title ${JSON.stringify(first && first.getAttribute('title'))}), expected 3 spans starting with the scenario "off"`);
             }
             if (!button('Copy results')) issues.push('Shaders tab: no "Copy results" button under the stored result');
+            // Render scale is gone from the tab, and the benchmark sits right after the Quality section
+            const subs = all('#screen .inner .tc-sub'), heads = subs.map(x => x.textContent.trim()), qi = heads.indexOf('Quality'), run = button('Run benchmark');
+            if (heads.includes('Performance')) issues.push('Shaders tab: the Performance section is still there');
+            if (qi < 0 || heads[qi + 1] !== 'Benchmark') issues.push(`Shaders tab: sections read ${JSON.stringify(heads)}, expected "Benchmark" right after "Quality"`);
+            else if (run && !(subs[qi + 1].compareDocumentPosition(run) & Node.DOCUMENT_POSITION_FOLLOWING && (!subs[qi + 2] || run.compareDocumentPosition(subs[qi + 2]) & Node.DOCUMENT_POSITION_FOLLOWING))) issues.push('Shaders tab: "Run benchmark" is not inside the Benchmark section');
+            const scaleRows = all('#screen .inner .tc-slider .tc-cap, #screen .inner button.mcb, #screen .inner .tc-bench-head').map(x => x.getAttribute('aria-label') || x.textContent.trim()).filter(t => /render scale|sharpen|\bscale\b/i.test(t));
+            if (scaleRows.length) issues.push(`Shaders tab: render-scale rows are still shown: ${JSON.stringify(scaleRows)}`);
             if (typeof bus._benchText === 'function') {
               const t = String(bus._benchText());
               if (!/^\| Scenario \| FPS \| Mean ms \| p95 ms \|/m.test(t) || !/^\| off \|/m.test(t)) issues.push(`_benchText() is not the Markdown results table: ${JSON.stringify(t.slice(0, 160))}`);
+              if (/^\| Scenario \|.*\bScale\b/m.test(t)) issues.push(`_benchText() still has a Scale column: ${JSON.stringify(t.slice(0, 160))}`);
             }
           }
         }
@@ -1166,6 +1448,43 @@ export const runtime = [
       const cleared = before ? !marker() : !/(^|\s)on(\s|$)/.test(scr.className);
       if (!cleared) issues.push(`our screen is still open after ${before ? 'back()' : 'closeMenu()'} (#screen class "${scr.className}")`);
       return !issues.length || issues.join('; ');
+    } },
+  { script: OPTIONS, name: 'the About tab\'s "Copy all settings" button (data-tc="copy-settings") copies exactly bus.settingsText()',
+    run: async () => {
+      const M = await import('/js/menus.js');
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      const bus = window.__tcOptions;
+      if (!bus || typeof bus.settingsText !== 'function') return 'window.__tcOptions.settingsText missing';
+      const scr = document.getElementById('screen'), before = scr.className;
+      const all = s => [...document.querySelectorAll(s)], sleep = ms => new Promise(r => setTimeout(r, ms));
+      const marker = () => !!document.querySelector('#screen .inner .tc-marker');
+      const tab = n => all('#screen .inner .tc-tabs button').find(b => b.getAttribute('aria-label') === n);
+      const show = async n => { const b = tab(n); if (!b) return false; b.click(); await __tcwait(() => { const x = tab(n); return x && x.classList.contains('on'); }, 1500); await sleep(100); return true; };
+      const clip = navigator.clipboard;
+      if (!clip) return 'can\'t verify: no navigator.clipboard in the test browser';
+      const got = [];
+      let start = null, out = true;
+      try {
+        Object.defineProperty(clip, 'writeText', { value: async t => { got.push(t); }, configurable: true });
+        await bus.open();
+        if (!(await __tcwait(marker, 5000))) return `menu not shown (#screen class "${scr.className}")`;
+        await sleep(300);
+        start = (all('#screen .inner .tc-tabs button.on')[0] || { getAttribute: () => null }).getAttribute('aria-label');
+        if (!(await show('About'))) return 'no About tab';
+        const b = document.querySelector('#screen .inner [data-tc="copy-settings"]');
+        if (!b) return `no [data-tc="copy-settings"] on the About tab (buttons: ${all('#screen .inner button.mcb').map(x => x.getAttribute('aria-label')).join(' | ')})`;
+        if (b.getAttribute('aria-label') !== 'Copy all settings') out = `the button is labelled ${JSON.stringify(b.getAttribute('aria-label'))}, expected "Copy all settings"`;
+        b.click();
+        if (!(await __tcwait(() => got.length > 0, 3000))) out = 'clicking the button wrote nothing to the clipboard';
+        else if (got[0] !== bus.settingsText()) out = `the clipboard text is not bus.settingsText(): ${JSON.stringify(String(got[0]).slice(0, 120))}`;
+      } catch (e) {
+        out = `threw: ${e.message}`;
+      } finally {
+        delete clip.writeText; // the instance property we added: the prototype's method is back
+        try { if (marker() && start && start !== 'About') await show(start); } catch (e) {}
+        if (before) M.back(); else M.closeMenu(); // restore
+      }
+      return out;
     } },
   { script: OPTIONS, name: '"Run benchmark" (bus._runBench) runs behind a see-through screen, then reopens our menu on the Shaders tab with the stored result, and leaves the shader settings as they were',
     run: async () => {
@@ -1232,9 +1551,10 @@ export const runtime = [
       if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
       const bus = window.__tcOptions, T = window.Twitterentary;
       if (!bus || typeof bus._runBench !== 'function' || typeof bus.get !== 'function' || typeof bus.set !== 'function') return 'window.__tcOptions._runBench/get/set missing';
-      // Without the shader script's bench.abort() (Better Options alone, or an older shader version) there is
-      // nothing to stop: Escape goes to the game as before, and the "Run benchmark" check covers the refusal.
-      if (!T || typeof T.bench !== 'function' || typeof T.bench.abort !== 'function') return true;
+      // Better Options alone: there is nothing to stop. Escape goes to the game as before, and the "Run benchmark"
+      // check covers the refusal. With the shader script loaded, a missing bench.abort() is a real regression.
+      if (!T) return true;
+      if (typeof T.bench !== 'function' || typeof T.bench.abort !== 'function') return 'Twitterentary.bench.abort() missing';
       const scr = document.getElementById('screen'), before = scr.className;
       const all = s => [...document.querySelectorAll(s)], q = s => document.querySelector(s), sleep = ms => new Promise(r => setTimeout(r, ms));
       const marker = () => !!q('#screen .inner .tc-marker'), benchScreen = () => !!q('#screen .inner .tc-bench-screen');
@@ -1272,12 +1592,12 @@ export const runtime = [
       try {
         // (a) Escape during the second scenario: the first row has finished, so it is saved, marked stopped.
         {
-          const tag = '(a) Escape', run = await start(['off', 'low+renderScale=0.7'], tag);
+          const tag = '(a) Escape', run = await start(['off', 'low'], tag);
           if (run) {
-            const inSecond = () => T.cfg.enabled === true && Math.abs(T.cfg.renderScale - 0.7) < 1e-6;
+            const inSecond = () => T.cfg.enabled === true && T.cfg.shadows === false;
             const t0 = performance.now();
             while (!run.t.done && !inSecond() && performance.now() - t0 < 40000) await sleep(50);
-            if (run.t.done || !inSecond()) issues.push(`${tag}: can't verify: the second scenario never started (${run.t.done ? `the run ended: ${brief(run.t.value)}` : `cfg.enabled ${T.cfg.enabled}, renderScale ${T.cfg.renderScale}`})`);
+            if (run.t.done || !inSecond()) issues.push(`${tag}: can't verify: the second scenario never started (${run.t.done ? `the run ended: ${brief(run.t.value)}` : `cfg.enabled ${T.cfg.enabled}, shadows ${T.cfg.shadows}`})`);
             else {
               // The game handles Escape in a window bubble-phase listener (and preventDefaults it itself), so a listener
               // of ours in the same phase, and the bench screen still being up, show whether it got through.
@@ -1382,6 +1702,96 @@ export const runtime = [
       const cleared = before ? !marker() && !benchScreen() : !/(^|\s)on(\s|$)/.test(scr.className);
       if (!cleared) issues.push(`a screen of ours is still open after ${before ? 'back()' : 'closeMenu()'} (#screen class "${scr.className}")`);
       return !issues.length || issues.join('; ');
+    } },
+  // Zoom 1.1.1: closes the title screen to press the key, so it runs with the checks that open menus.
+  { script: ZOOM, name: 'zoom: a hold tweens to FOV / level and back, quick taps and blur always end on the real FOV, the wheel coalesces its writes, and __tcZoom and Copy settings never report a zoomed FOV',
+    run: async () => {
+      const M = await import('/js/menus.js');
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      const Z = window.__tcZoom, bus = window.__tcOptions;
+      if (!Z || typeof Z.zooming !== 'boolean' || typeof Z.realFov !== 'number' || !('version' in Z)) return `window.__tcZoom should be { zooming, realFov, version }: ${JSON.stringify(Z)}`;
+      const scr = document.getElementById('screen'), before = scr.className, prev = localStorage.getItem('mc.fov');
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      const fire = t => window.dispatchEvent(new KeyboardEvent(t, { code: 'KeyC', key: 'c', bubbles: true, cancelable: true }));
+      const wheel = (dy, n) => { for (let i = 0; i < n; i++) window.dispatchEvent(new WheelEvent('wheel', { deltaY: dy, bubbles: true, cancelable: true })); };
+      const stored = () => Number(localStorage.getItem('mc.fov'));
+      const near = (a, b) => Math.abs(a - b) < 1e-6;
+      const Set_ = Storage.prototype.setItem, writes = []; // every value written to mc.fov, and nothing about any other key
+      const a = document.activeElement;
+      if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) a.blur(); // it refuses while typing
+      const level = Math.max(1.5, Math.min(20, Number(bus && bus.get ? bus.get('zoom.level', 4) : 4) || 4));
+      const bad = [];
+      const monotonic = (list, sign) => list.every((v, i) => !i || (v - list[i - 1]) * sign >= -1e-6);
+      // Ends a press and waits until the view is back; true when it ends exactly on `fov`, with zooming false
+      const settled = async fov => __tcwait(() => !Z.zooming && near(stored(), fov), 6000);
+      try {
+        if (before) { // a press with a screen on is refused
+          fire('keydown');
+          if (Z.zooming) bad.push('a press with a screen on started a zoom');
+          fire('keyup');
+          M.closeMenu();
+        }
+        if (/(^|\s)on(\s|$)/.test(scr.className)) return `can't verify: #screen class is still "${scr.className}" after closeMenu()`;
+        Storage.prototype.setItem = function (k, v) { if (this === localStorage && k === 'mc.fov') writes.push(Number(v)); return Set_.call(this, k, v); };
+        const orig = Z.realFov, target = orig / level;
+        if (!(orig >= 30 && orig <= 110)) return `can't verify: __tcZoom.realFov is ${orig} before any zoom`;
+        // Hold, and let go: one even tween each way, and the real FOV stays reported throughout
+        fire('keydown');
+        if (Z.zooming !== true) bad.push('the first press did not start a zoom at once');
+        if (!(await __tcwait(() => near(stored(), target), 6000))) bad.push(`a hold ended on mc.fov ${stored()}, expected ${target}`);
+        if (Z.realFov !== orig) bad.push(`__tcZoom.realFov is ${Z.realFov} mid-zoom, expected ${orig}`);
+        if (bus && typeof bus.settingsText === 'function') { const f = JSON.parse(bus.settingsText()).game.fov; if (f !== orig) bad.push(`Copy settings reports FOV ${f} while zoomed, expected ${orig}`); }
+        if (!monotonic(writes, -1)) bad.push(`the tween in did not move steadily down: ${writes.slice(0, 12).join(', ')}`);
+        writes.length = 0;
+        fire('keyup');
+        if (Z.zooming !== true) bad.push('zooming went false at key-up: it should stay true until the tween back has finished');
+        if (Z.realFov !== orig) bad.push(`__tcZoom.realFov is ${Z.realFov} on the way back, expected ${orig}`);
+        if (!(await settled(orig))) bad.push(`after a release mc.fov is ${stored()}, zooming ${Z.zooming}, expected ${orig}, false`);
+        if (!monotonic(writes, 1)) bad.push(`the tween back did not move steadily up: ${writes.slice(0, 12).join(', ')}`);
+        // A quick tap in one tick, then five rapid ones: only the end state is promised
+        fire('keydown'); fire('keyup');
+        if (!(await settled(orig))) bad.push(`after a one-tick tap mc.fov is ${stored()}, zooming ${Z.zooming}, expected ${orig}, false`);
+        for (let i = 0; i < 5; i++) { fire('keydown'); await sleep(30); fire('keyup'); await sleep(30); }
+        if (!(await settled(orig))) bad.push(`after five quick taps mc.fov is ${stored()}, zooming ${Z.zooming}, expected ${orig}, false`);
+        await sleep(400);
+        if (Z.zooming || !near(stored(), orig)) bad.push(`after the taps settled mc.fov moved to ${stored()} (zooming ${Z.zooming})`);
+        // The wheel: nothing written in its tick, at most one write a frame after it, and back down to the same level
+        fire('keydown');
+        if (!(await __tcwait(() => near(stored(), target), 6000))) bad.push(`a second hold ended on mc.fov ${stored()}, expected ${target}`);
+        writes.length = 0;
+        let frames = 0, counting = true;
+        const count = () => { if (counting) { frames++; requestAnimationFrame(count); } };
+        requestAnimationFrame(count);
+        wheel(-100, 6);
+        if (writes.length) bad.push(`six wheel events wrote mc.fov ${writes.length} times in their own tick, expected 0 (one write a frame)`);
+        const zoomedIn = await __tcwait(() => stored() < target - 1e-6 && writes.length && near(stored(), writes[writes.length - 1]), 6000);
+        await sleep(500);
+        counting = false;
+        if (!zoomedIn) bad.push(`the wheel did not zoom further in: mc.fov ${stored()}, hold target ${target}`);
+        if (writes.length > frames + 1) bad.push(`the wheel wrote mc.fov ${writes.length} times over ${frames} frames, more than one a frame`);
+        wheel(100, 6); // undoes the level, which stays in memory for the session
+        if (!(await __tcwait(() => near(stored(), target), 6000))) bad.push(`wheeling back ended on mc.fov ${stored()}, expected ${target}`);
+        fire('keyup');
+        if (!(await settled(orig))) bad.push(`after the wheel and a release mc.fov is ${stored()}, zooming ${Z.zooming}, expected ${orig}, false`);
+        // Losing the window restores at once: rAF stops in a hidden tab, so a tween could not finish
+        fire('keydown');
+        await __tcwait(() => stored() < orig - 1e-6, 6000);
+        window.dispatchEvent(new Event('blur'));
+        if (Z.zooming !== false || !near(stored(), orig)) bad.push(`blur left mc.fov ${stored()}, zooming ${Z.zooming}, expected ${orig}, false in the same tick`);
+        fire('keyup');
+        // A stale zoomed value in storage is not the real FOV
+        Set_.call(localStorage, 'mc.fov', '17.5');
+        if (!(Z.realFov >= 30 && Z.realFov <= 110)) bad.push(`with mc.fov = 17.5 stored __tcZoom.realFov is ${Z.realFov}: only the game's 30-110 counts`);
+        Set_.call(localStorage, 'mc.fov', String(orig));
+      } catch (e) {
+        bad.push(`threw: ${e.message}`);
+      } finally {
+        Storage.prototype.setItem = Set_;
+        try { fire('keyup'); window.dispatchEvent(new Event('blur')); } catch (e) {}
+        if (prev === null) localStorage.removeItem('mc.fov'); else localStorage.setItem('mc.fov', prev);
+        if (before && !/(^|\s)on(\s|$)/.test(scr.className)) M.back(); // back to the title screen
+      }
+      return !bad.length || bad.slice(0, 8).join('; ');
     } },
   // Changes settings (all back to their defaults), so it runs after the checks that read them.
   { script: OPTIONS, name: '"Reset all options" (About tab, confirmed in the game\'s dialog) restores our options, the shader defaults, FOV 70 and the default render distance',
@@ -1500,6 +1910,114 @@ export const runtime = [
         await I.setLocale(was); // back to the language the test started in
       }
     } },
+  // Both of these rebuild a screen, so they stay last. Better Options is driven with a fake menus module, on planted
+  // nodes only: the title's own children are never moved. No macrotask runs between setting a scene up and tearing it
+  // down, so the game never sees one.
+  { script: OPTIONS, name: 'grabFovInput opens the game Options, then restores the pause menu or no menu, with document.exitPointerLock an own property for exactly that span',
+    run: async () => {
+      const real = await import('/js/menus.js');
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      const bus = window.__tcOptions;
+      if (!bus || typeof bus._injectMenus !== 'function' || typeof bus._labels !== 'function' || !bus.fov || typeof bus.fov.prime !== 'function' || typeof bus.fov._forget !== 'function') return 'window.__tcOptions._injectMenus/_labels/fov.prime/fov._forget missing';
+      const scr = document.getElementById('screen'), inner = scr && scr.querySelector('.inner'), cross = document.getElementById('cross');
+      if (!inner || !cross) return '#screen .inner or #cross missing';
+      const label = (bus._labels().options || [])[0];
+      if (!label) return 'no pause Options label';
+      const own = () => Object.prototype.hasOwnProperty.call(document, 'exitPointerLock');
+      if (own()) return "can't verify: document.exitPointerLock is an own property before the test";
+      const a = document.activeElement;
+      if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) a.blur(); // prime() refuses while typing
+      const before = scr.className, crossOff = cross.classList.contains('off'), planted = [], bad = [];
+      const clear = () => { for (const n of planted.splice(0)) n.remove(); };
+      const plant = (tag, attrs) => { const n = document.createElement(tag); for (const k of Object.keys(attrs)) n.setAttribute(k, attrs[k]); inner.append(n); planted.push(n); return n; };
+      const pauseUp = () => plant('button', { 'aria-label': label });
+      const scene = {
+        pause: () => { scr.className = 'on'; pauseUp(); },
+        idle: () => { scr.className = ''; cross.classList.remove('off'); },
+      };
+      const run = async (tag, spot, want, refuse) => {
+        const log = [], shadow = [];
+        let input = null;
+        const note = n => { log.push(n); shadow.push(own()); };
+        const fake = {
+          openOptions() { note('openOptions'); clear(); input = plant('input', { type: 'range', 'data-k': 'fov' }); },
+          openPause() { note('openPause'); if (refuse) return; clear(); pauseUp(); },
+          closeMenu() { note('closeMenu'); clear(); scr.className = ''; },
+          showScreen() { note('showScreen'); },
+        };
+        bus.fov._forget();
+        bus._injectMenus(fake);
+        clear();
+        scene[spot]();
+        const got = await bus.fov.prime();
+        if (got !== true) bad.push(`${tag}: prime() resolved ${JSON.stringify(got)}, expected true`);
+        if (log.join() !== want.join()) bad.push(`${tag}: the calls were [${log.join(', ')}], expected [${want.join(', ')}]`);
+        if (shadow.includes(false)) bad.push(`${tag}: document.exitPointerLock was not an own property during [${log.filter((n, i) => !shadow[i]).join(', ')}]`);
+        if (own()) bad.push(`${tag}: document.exitPointerLock is still an own property afterwards`);
+        if (input && (input.min !== '2' || input.step !== 'any')) bad.push(`${tag}: the FOV input was not widened (min ${input.min}, step ${input.step})`);
+      };
+      try {
+        await run('pause menu up', 'pause', ['openOptions', 'openPause']);
+        await run('pause menu refused', 'pause', ['openOptions', 'openPause', 'closeMenu'], true);
+        await run('no menu, no lock', 'idle', ['openOptions', 'closeMenu']);
+      } catch (e) {
+        bad.push(`threw: ${e.message}`);
+      } finally {
+        if (own()) delete document.exitPointerLock;
+        clear();
+        scr.className = before;
+        if (crossOff) cross.classList.add('off');
+        bus._injectMenus(real);
+        bus.fov._forget();
+      }
+      return !bad.length || bad.join('; ');
+    } },
+  // localStealFov is private and imports the real module, so this drives the real path: a first press with setNow hidden.
+  // It leaves Zoom's own input cached for the rest of the page, which is why it runs after the "zoom:" check above.
+  { script: ZOOM, name: 'localStealFov (a first press with no setNow) opens and closes the game Options with document.exitPointerLock an own property for exactly that span',
+    run: async () => {
+      const M = await import('/js/menus.js');
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      const Z = window.__tcZoom, bus = window.__tcOptions;
+      if (!Z) return 'window.__tcZoom missing';
+      // Alone, Zoom already took this path in the "zoom:" check and has the input cached: nothing is left to observe.
+      if (!bus || !bus.fov) return true;
+      const scr = document.getElementById('screen'), inner = scr && scr.querySelector('.inner');
+      if (!inner) return '#screen .inner missing';
+      const own = () => Object.prototype.hasOwnProperty.call(document, 'exitPointerLock');
+      if (own()) return "can't verify: document.exitPointerLock is an own property before the test";
+      const before = scr.className, prev = localStorage.getItem('mc.fov'), fov = bus.fov, key = bus.get('zoom.key', 'KeyC');
+      const fire = t => window.dispatchEvent(new KeyboardEvent(t, { code: key, bubbles: true, cancelable: true }));
+      const calls = [], bad = [];
+      try {
+        if (before) M.closeMenu();
+        if (scr.classList.contains('on')) return `can't verify: #screen class is still "${scr.className}" after closeMenu()`;
+        const a = document.activeElement;
+        if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) a.blur(); // it refuses while typing
+        bus.fov = { get: fov.get, set: fov.set };
+        inner.replaceChildren = function (...kids) {
+          Element.prototype.replaceChildren.apply(this, kids);
+          calls.push(`${this.querySelector('input[type="range"][data-k="fov"]') ? 'open' : 'close'}:${own()}`);
+        };
+        fire('keydown');
+        fire('keyup');
+        if (!(await __tcwait(() => !Z.zooming, 5000))) bad.push('the first press never settled');
+        const got = calls.join();
+        if (got !== 'open:true,close:true') bad.push(`showScreen/closeMenu ran as [${got}] (name:shadowed), expected [open:true,close:true]`);
+        if (own()) bad.push('document.exitPointerLock is still an own property afterwards');
+      } catch (e) {
+        bad.push(`threw: ${e.message}`);
+      } finally {
+        delete inner.replaceChildren;
+        bus.fov = fov;
+        try { fire('keyup'); window.dispatchEvent(new Event('blur')); } catch (e) {}
+        if (own()) delete document.exitPointerLock;
+        if (prev === null) localStorage.removeItem('mc.fov'); else localStorage.setItem('mc.fov', prev);
+        if (scr.className !== before) { if (before) M.back(); else M.closeMenu(); } // also when Options stayed open
+      }
+      if (scr.className !== before) bad.push(`#screen class is "${scr.className}" afterwards, it was "${before}"`);
+      return !bad.length || bad.join('; ');
+    } },
 ];
 
 export const shaders = [
@@ -1511,21 +2029,23 @@ export const shaders = [
   { script: SHADERS, name: 'terrain fragment shaders get the shadow parameters as a uniform (tile sizes, atlas texel)', kind: 'terrain', stage: 'fs', marker: 'uniform vec4 uShadowP;', min: 6 },
   // 1.5: per-frame values hoisted to the CPU (hemisphere ambient, sun colour), the shadow tiles' bounds, and the
   // one smooth VS->FS varying (vTcP) instead of vRel + flat vCls + vTcBlk, and block light from the game's own
-  // lightmap() in the lit FS. No flat varyings: on ANGLE/D3D11 a program with a flat varying costs ~2.3 GPU ms per
-  // frame at rd 12 (LAB2, UHD 620), likely the geometry shader ANGLE adds for flat's provoking vertex.
+  // lightmap() in the lit FS. No flat varyings: on ANGLE/D3D11 our old flat vCls, which every terrain pixel read, cost
+  // ~2.3 GPU ms per frame at rd 12 (LAB2, UHD 620), likely the geometry shader ANGLE adds for flat's provoking vertex.
+  // The game's own flat vGlass (build 6b3963e444) is stripped by the same rule, not for that cost: measured on the title
+  // screen, the strip gains nothing. These markers stay at 0 and are the proof of the strip.
   { script: SHADERS, name: 'terrain fragment shaders get the hoisted ambient and sun uniforms', kind: 'terrain', stage: 'fs', marker: 'uniform vec3 uAmb0;', min: 6 },
   { script: SHADERS, name: 'terrain fragment shaders get the shadow tile bounds (near/far cascades)', kind: 'terrain', stage: 'fs', marker: 'uniform vec4 uShadowB;', min: 6 },
   { script: SHADERS, name: 'terrain fragment shaders get the near shadow tile as a transform of the far tile\'s light space', kind: 'terrain', stage: 'fs', marker: 'uniform vec4 uShadowN;', min: 6 },
   { script: SHADERS, name: 'terrain vertex shaders pass position and layer class to the FS in one varying (vTcP)', kind: 'terrain', stage: 'vs', marker: 'out vec4 vTcP;', min: 7 },
   { script: SHADERS, name: 'terrain fragment shaders read the one vTcP varying', kind: 'terrain', stage: 'fs', marker: 'in vec4 vTcP;', min: 6 },
   { script: SHADERS, name: 'lit terrain fragment shaders take block light from the game\'s own lightmap()', kind: 'terrain', stage: 'fs', marker: 'lightmap(vec2(0.0, vLight.y)) - uTcLm0', min: 3 },
-  { script: SHADERS, name: 'no terrain vertex shader has a flat varying (ANGLE/D3D11 makes flat cost ~2.3 ms per frame at rd 12)', kind: 'terrain', stage: 'vs', marker: 'flat ', max: 0 },
+  { script: SHADERS, name: 'no terrain vertex shader has a flat varying (our old flat vCls cost ~2.3 ms per frame at rd 12 on ANGLE/D3D11)', kind: 'terrain', stage: 'vs', marker: 'flat ', max: 0 },
   { script: SHADERS, name: 'no terrain fragment shader has a flat varying', kind: 'terrain', stage: 'fs', marker: 'flat ', max: 0 },
+  // 1.5.1: the layer is 9 bits from build 6b3963e444 (the layers >= 256 runtime check proves which decode a build got).
+  // tcLayer exists on both forms. 7 game terrain VS + the 2 cutout shadow VS; the depth-only shadow VS has no layer.
+  { script: SHADERS, name: 'terrain and cutout shadow vertex shaders read the layer through tcLayer', kind: 'terrain', stage: 'vs', marker: 'int tcLayer = int(aInfo.x', min: 9 },
   { script: SHADERS, name: 'sky shaders patched', kind: 'sky', stage: 'fs', marker: 'uniform vec3 uSkySun;', min: 2 },
   { script: SHADERS, name: 'sky shaders get the hoisted sun-glow colour', kind: 'sky', stage: 'fs', marker: 'uniform vec3 uSkyGlow;', min: 2 },
-  // 1.5: our composite program (scene FBO -> canvas: bilinear upscale + sharpen), linked on the first frame. labelProgram()
-  // names it by its first two uniforms (VS uTcScale, FS uTcScene).
-  { script: SHADERS, name: 'the scene composite program (render-scale upscale + sharpen) is linked', kind: 'tcscale-tcscene', stage: 'fs', marker: 'uniform highp sampler2D uTcScene;', min: 1 },
   { script: SHADERS, name: 'cloud shader patched', kind: 'cloud', stage: 'fs', marker: 'uniform vec3 uCloudTint;', min: 1,
     known: 'patchCloud() regexes are double-escaped ("\\\\s" instead of "\\s"), so they never match and clouds are never patched' },
 ];

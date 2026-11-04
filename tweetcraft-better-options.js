@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweetcraft Better Options
 // @namespace    tweetcraft.twitterentary
-// @version      1.2.0
+// @version      1.3.0
 // @description  Adds a custom options menu for graphics, interface, keybinds, shaders, and zoom settings, plus a performance overlay and an in-game benchmark.
 // @author       Twitterentary
 // @match        https://tweetcraft.jai.vin/*
@@ -169,34 +169,130 @@
 
   let fovCache = (() => { const v = Number(store.get('mc.fov')); return v >= 30 && v <= 110 ? v : 70; })();
   const getFov = () => fovCache;
+  // While zoom is active mc.fov holds the zoomed value; __tcZoom (Zoom 1.1.1+) knows the player's own.
+  function zoomRealFov() {
+    try { const z = window.__tcZoom; if (z && z.zooming && Number.isFinite(z.realFov)) return z.realFov; } catch (e) {}
+    return null;
+  }
   // The game's own Options screen writes mc.fov too; pick that up before showing our slider.
   // 30-110 like the game's own load check: a reload while zoomed can leave a transient low value in mc.fov.
-  function syncFov() { const v = Number(store.get('mc.fov')); if (v >= 30 && v <= 110) fovCache = v; }
-  let fovInput;
-  async function stealFovInput() {
-    if (fovInput !== undefined) return fovInput;
-    const M = await menus();
-    if (!M) { fovInput = null; return null; }
-    const wasOurs = ourMenuOpen();
-    const gl = document.getElementById('gl');
-    const wasLocked = !!gl && document.pointerLockElement === gl;
-    fovInput = null;
+  function syncFov() {
+    const r = zoomRealFov();
+    if (r !== null) { fovCache = r; return; }
+    const v = Number(store.get('mc.fov'));
+    if (v >= 30 && v <= 110) fovCache = v;
+  }
+  // The FOV the player chose, never a zoomed one.
+  function realFov() {
+    const r = zoomRealFov();
+    if (r !== null) return r;
+    const v = Number(store.get('mc.fov'));
+    return v >= 30 && v <= 110 ? v : 70;
+  }
+
+  // The game's FOV slider handler is the only way to set S.baseFov, and only M.openOptions() builds it. We keep that
+  // input, detached, and write through it. fovInput: undefined = not fetched yet, null = the game has no such input.
+  let fovInput, fovFails = 0, primeObs = null;
+  const noExitLock = () => {};
+  function pauseUp() {
+    if (!screenIsOn()) return false;
+    for (const b of document.querySelectorAll('#screen .inner button[aria-label]')) {
+      if (LBL.options.has(b.getAttribute('aria-label'))) return true;
+    }
+    return false;
+  }
+  // Which screen we can put back after opening the game's Options: '' means leave everything alone. Nothing that
+  // only the game can rebuild qualifies (title, servers, verify, editors, containers, chat).
+  function fovSpot() {
+    if (ourMenuOpen()) return 'ours';
+    if (pauseUp()) return 'pause';
+    return (screenIsOn() || !invClosed() || chatOpen() || editorOpen()) ? '' : 'idle';
+  }
+  // One synchronous task, so no frame paints the Options screen. showScreen's releaseInput exits pointer lock, and
+  // pointerlockchange would then open the pause menu, so exitPointerLock is a no-op for this task only: the lock is
+  // never lost. Held keys are still released once.
+  function grabFovInput(M, spot) {
+    const scr = document.getElementById('screen'), top = scr ? scr.scrollTop : 0;
+    let shadowed = false;
+    try { document.exitPointerLock = noExitLock; shadowed = true; } catch (e) {}
     try {
       M.openOptions();
       const el = $('#screen .inner input[type="range"][data-k="fov"]');
-      if (el) { el.min = '5'; el.step = 'any'; fovInput = el; }
-    } catch (e) { console.warn(TAG, e); }
-    try { if (wasOurs) M.showScreen(MENU_NAME, buildScreen, 'dim'); else M.closeMenu(); } catch (e) {}
-    if (wasLocked && gl && gl.requestPointerLock) { try { gl.requestPointerLock(); } catch (e) {} }
-    return fovInput;
+      if (el) { el.min = '2'; el.step = 'any'; fovInput = el; } else fovInput = null;
+    } catch (e) {
+      console.warn(TAG, 'FOV input not available yet', e);
+      if (++fovFails >= 3) fovInput = null; // never keep rebuilding a screen that fails
+    }
+    try {
+      if (spot === 'ours') M.showScreen(MENU_NAME, buildScreen, 'dim');
+      else if (spot === 'pause') { M.openPause(); if (!pauseUp()) M.closeMenu(); } // openPause can refuse
+      else M.closeMenu();
+    } catch (e) {
+      try { M.closeMenu(); } catch (e2) {}
+    }
+    if (shadowed) { try { delete document.exitPointerLock; } catch (e) {} }
+    if (scr && spot !== 'idle') scr.scrollTop = top;
+  }
+  async function stealFovInput() {
+    if (fovInput !== undefined) return fovInput;
+    const M = await menus();
+    if (fovInput !== undefined) return fovInput; // another call got there during the await
+    if (!M) { fovInput = null; return null; }
+    const spot = fovSpot();
+    if (spot) grabFovInput(M, spot);
+    return fovInput || null;
+  }
+  // Fills the cache only where nobody can notice: the pause menu, or in the world with no menu and no pointer lock
+  // (from spawn to the player's first click). #cross is the only DOM sign that the game has no menu of any kind: its
+  // inventories set S.menu without showing #screen. The title is skipped: joining a world reloads the page.
+  function primeNow() {
+    if (fovInput !== undefined) return !!fovInput;
+    if (!_menus || benchBusy || bus.capturing) return false;
+    const spot = fovSpot(), cross = document.getElementById('cross');
+    const idle = spot === 'idle' && window.__ready === true && !document.pointerLockElement && !document.hidden &&
+      !isTyping(document.activeElement) && !!cross && !cross.classList.contains('off') &&
+      !isTouch(); // touch play never takes pointer lock, so "no lock" isn't idle there
+    if (spot === 'pause' || idle) grabFovInput(_menus, spot);
+    return !!fovInput;
+  }
+  // Primes the moment the pause menu opens, so the rebuild can't land between a press and a release on its buttons.
+  function watchForPause() {
+    if (primeObs || fovInput !== undefined || typeof MutationObserver !== 'function') return;
+    const scr = document.getElementById('screen'), inner = scr && scr.querySelector('.inner');
+    if (!inner) return;
+    primeObs = new MutationObserver(() => {
+      try {
+        if (fovInput === undefined && pauseUp()) primeNow();
+        if (fovInput !== undefined && primeObs) { primeObs.disconnect(); primeObs = null; }
+      } catch (e) {}
+    });
+    primeObs.observe(scr, { attributes: true, attributeFilter: ['class'] });
+    primeObs.observe(inner, { childList: true });
+  }
+  // One attempt, now. Resolves true once the input is cached; never rejects, and safe to call on a timer.
+  async function primeFov() {
+    try { await menus(); watchForPause(); return primeNow(); } catch (e) { return false; }
+  }
+  const clampFov = v => Math.max(2, Math.min(110, Number(v) || 70));
+  function writeFov(inp, v) {
+    try { inp.value = String(v); inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+  }
+  // Synchronous, for per-frame use. The game's handler saves mc.fov.
+  function setFovNow(v) {
+    if (!fovInput) return false;
+    v = clampFov(v);
+    fovCache = v;
+    writeFov(fovInput, v);
+    return true;
   }
   async function setFov(v) {
-    v = Math.max(2, Math.min(110, Number(v) || 70));
+    v = clampFov(v);
     fovCache = v; store.set('mc.fov', v);
+    if (fovInput) { writeFov(fovInput, v); return; }
     const inp = await stealFovInput();
-    if (inp) { inp.value = String(v); inp.dispatchEvent(new Event('input', { bubbles: true })); }
+    if (inp) writeFov(inp, fovCache); // the latest value: a later call may have landed during the await
   }
-  bus.fov = { get: getFov, set: setFov };
+  bus.fov = { get: getFov, set: setFov, setNow: setFovNow, prime: primeFov, _forget: () => { fovInput = undefined; } };
 
   const currentRd = () => { const v = Number(store.get('mc.rd')); return RDS.includes(v) ? v : 8; };
   // The pause menu's Distance button, found by its label in the current language.
@@ -517,9 +613,9 @@
       #screen .inner .tc-slider > .tc-range:focus-visible { outline: var(--u) solid #ffffa0; outline-offset: var(--u); }
       #screen .inner .tc-slider > .tc-range::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: calc(8 * var(--u)); height: calc(18 * var(--u)); border: calc(3 * var(--u)) solid transparent; border-image: url(/assets/gui/button.png) 3 fill / calc(3 * var(--u)) stretch; }
       #screen .inner .tc-slider > .tc-range::-moz-range-thumb { width: calc(8 * var(--u)); height: calc(18 * var(--u)); border-radius: 0; border: calc(3 * var(--u)) solid transparent; border-image: url(/assets/gui/button.png) 3 fill / calc(3 * var(--u)) stretch; }
-      /* the last benchmark: name, FPS, p95, scale. Column widths in em follow --tc-f on narrow screens */
+      /* the last benchmark: name, FPS, p95. Column widths in em follow --tc-f on narrow screens */
       #screen .inner .tc-bench { display: flex; flex-direction: column; flex: none; width: min(94vw, calc(200 * var(--u))); font: var(--tc-f, calc(8 * var(--u)))/1.25 "Tweetcraft", ui-monospace, monospace; color: #e0e0e0; text-shadow: calc(var(--tc-f, calc(8 * var(--u))) / 8) calc(var(--tc-f, calc(8 * var(--u))) / 8) 0 #3f3f3f; }
-      #screen .inner .tc-bench > div { display: grid; grid-template-columns: minmax(0, 1fr) 4.5em 5.5em 4.5em; column-gap: 0.5em; }
+      #screen .inner .tc-bench > div { display: grid; grid-template-columns: minmax(0, 1fr) 4.5em 5.5em; column-gap: 0.5em; }
       #screen .inner .tc-bench > div > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
       #screen .inner .tc-bench > div > span:first-child { text-align: left; }
       #screen .inner .tc-bench > .tc-bench-head { color: #a0a0a0; }
@@ -719,7 +815,7 @@
   // The game's own keys are F1, F3 and F5 (main.js onKeyDown); F2 is unbound there, in every browser, and in our
   // other scripts (shaders K, zoom C).
   const PERF_KEY_DEF = 'F2';
-  const PERF_LINES = ['fps', 'cpu', 'scale', 'bound', 'shadow'];
+  const PERF_LINES = ['fps', 'cpu', 'bound', 'shadow'];
   let perfKey = PERF_KEY_DEF;
   function readPerfKey() { const k = bus.get('perf.key', PERF_KEY_DEF); perfKey = (typeof k === 'string' && k) ? k : PERF_KEY_DEF; }
   readPerfKey();
@@ -780,13 +876,12 @@
       const TE = window.Twitterentary, p = TE && TE.perf, c = (TE && TE.cfg) || {};
       if (!p || typeof p !== 'object') {
         perfSet('fps', 'No performance data (needs Shaders 1.5)');
-        perfSet('cpu', null); perfSet('scale', null); perfSet('bound', null); perfSet('shadow', null);
+        perfSet('cpu', null); perfSet('bound', null); perfSet('shadow', null);
         return;
       }
-      perfSet('fps', fx0(p.fps) + ' FPS · ' + fx1(p.ms) + ' ms');
+      // fpsGame (Shaders 1.5.1+) counts frames the way the game's F3 line does, so the two agree
+      perfSet('fps', fx0(isNum(p.fpsGame) && p.fpsGame > 0 ? p.fpsGame : p.fps) + ' FPS · ' + fx1(p.ms) + ' ms');
       perfSet('cpu', 'CPU ' + fx1(p.cpuMs) + ' ms · GPU ' + (isNum(p.gpuMs) ? p.gpuMs.toFixed(1) + ' ms' : 'n/a'));
-      const mode = c.enabled === false ? 'Off' : (c.renderScale === 0 ? 'Auto' : 'Fixed');
-      perfSet('scale', 'Scale ' + fx0(isNum(p.scale) ? p.scale * 100 : NaN) + '% (' + mode + ')');
       perfSet('bound', p.cpuBound === true ? 'CPU-bound' : null);
       perfSet('shadow', c.shadows === false ? 'Shadows off' : 'Shadows ' + fx0(p.shadowRefreshPerMin) + '/min');
     } catch (e) {}
@@ -936,7 +1031,6 @@
     return (b && typeof b === 'object' && Array.isArray(b.rows)) ? b : null;
   }
   const benchNum = (v, dp) => (isNum(v) ? v.toFixed(dp) : 'n/a');
-  const benchPct = v => (isNum(v) ? Math.round(v * 100) + '%' : 'n/a');
   // The pixel font has no ×, so the menu says 1920x1080; the clipboard copy uses ×.
   function benchEnv(b, full) {
     const e = (b && b.env) || {}, parts = ['GPU ' + (e.gpu || 'unknown')];
@@ -957,12 +1051,12 @@
     b = b || lastBench();
     if (!b || !Array.isArray(b.rows)) return '';
     const md = s => String(s).replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
-    const lines = ['| Scenario | FPS | Mean ms | p95 ms | 1% low | CPU ms | GPU ms | Scale |', '|---|---:|---:|---:|---:|---:|---:|---:|'];
+    const lines = ['| Scenario | FPS | Mean ms | p95 ms | 1% low | CPU ms | GPU ms |', '|---|---:|---:|---:|---:|---:|---:|'];
     for (const r of b.rows) {
       if (!r || typeof r !== 'object') continue;
       lines.push('| ' + md(r.name == null ? '?' : r.name) + (r.note ? ' (' + md(r.note) + ')' : '') +
         ' | ' + benchNum(r.fps, 1) + ' | ' + benchNum(r.ms, 1) + ' | ' + benchNum(r.p95, 1) + ' | ' + benchNum(r.low1, 1) +
-        ' | ' + benchNum(r.cpuMs, 1) + ' | ' + benchNum(r.gpuMs, 1) + ' | ' + benchPct(r.scale) + ' |');
+        ' | ' + benchNum(r.cpuMs, 1) + ' | ' + benchNum(r.gpuMs, 1) + ' |');
     }
     const p = benchPartial(b);
     return lines.join('\n') + '\n\n' + (p ? '_' + BENCH_PARTIAL_NOTE[p] + '_\n\n' : '') + benchEnv(b, true) + '\n';
@@ -979,14 +1073,90 @@
       return !!document.execCommand('copy');
     } catch (e) { return false; } finally { if (ta) ta.remove(); }
   }
+  async function copyText(text) {
+    let ok = false;
+    try { if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') { await navigator.clipboard.writeText(text); ok = true; } } catch (e) {}
+    return ok || copyFallback(text);
+  }
   async function copyBench() {
     const text = benchText();
     if (!text) { toast('No benchmark results yet'); return; }
-    let ok = false;
-    try { if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') { await navigator.clipboard.writeText(text); ok = true; } } catch (e) {}
-    if (!ok) ok = copyFallback(text);
+    const ok = await copyText(text);
     if (!ok) console.log(TAG, 'benchmark results:\n' + text);
     toast(ok ? 'Benchmark results copied' : 'Copy failed. The results are in the console');
+  }
+
+  // ---- "Copy all settings": one JSON text for sharing. Every source is a fixed list of names or the tc.shader. prefix:
+  // this never walks the game's mc.* keys or the rest of localStorage, because those hold the player's identity.
+  // tc.options holds only the keys below plus bench.last (a result, not a setting) and whatever other mods save, so
+  // it's an allow-list too.
+  const OPTION_KEYS = ['ui.scale', 'hud.on', 'input.sens', 'keys.map', 'keys.mute', 'perf.overlay', 'perf.key', 'zoom.key', 'zoom.level', 'zoom.look'];
+  // null when the script isn't loaded; an older copy that's loaded but has no version says so.
+  const scriptVersion = (loaded, v) => (loaded ? String(v || 'unknown') : null);
+  function gpuName() {
+    try {
+      const c = document.getElementById('gl'), gl = c && c.getContext('webgl2');
+      if (gl) {
+        const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+        const s = gl.getParameter(dbg ? dbg.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
+        if (s) return String(s);
+      }
+    } catch (e) {}
+    const b = lastBench();
+    return (b && b.env && b.env.gpu) || null;
+  }
+  function shaderSettings() {
+    const out = {};
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || k.indexOf(SHADER_PREFIX) !== 0) continue;
+        const raw = localStorage.getItem(k);
+        let v = raw;
+        try { v = JSON.parse(raw); } catch (e) {}
+        out[k.slice(SHADER_PREFIX.length)] = v;
+      }
+    } catch (e) {}
+    // the shader script stores only what differs from its defaults
+    const TE = window.Twitterentary, c = TE && TE.cfg;
+    if (c && Array.isArray(TE.schema)) {
+      for (const f of TE.schema) if (f && f.key && !(f.key in out) && c[f.key] !== undefined) out[f.key] = c[f.key];
+    }
+    const sorted = {};
+    for (const k of Object.keys(out).sort()) sorted[k] = out[k];
+    return sorted;
+  }
+  function settingsText() {
+    const TE = window.Twitterentary, Z = window.__tcZoom, rd = Number(store.get('mc.rd'));
+    const options = {};
+    for (const k of OPTION_KEYS) { const v = bus.get(k); if (v !== undefined) options[k] = clone(v); }
+    return JSON.stringify({
+      tweetcraftSettings: 1,
+      scripts: {
+        shaders: scriptVersion(!!TE, TE && TE.version),
+        betterOptions: VERSION,
+        zoom: scriptVersion(!!Z || sections.some(s => s.id === 'zoom'), Z && Z.version),
+        chatHistory: scriptVersion(!!window.__mcChatHistory, window.__mcChatHistory && window.__mcChatHistory.version)
+      },
+      gpu: gpuName(),
+      screen: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 },
+      game: {
+        rd: RDS.includes(rd) ? rd : defaultRd(),
+        fov: realFov(),
+        heldLight: store.get('mc.heldLight') !== '0',
+        fireflies: store.get('mc.fireflies'),
+        lang: store.get('mc.lang')
+      },
+      shaders: shaderSettings(),
+      options
+    }, null, 2);
+  }
+  bus.settingsText = settingsText;
+  async function copySettings() {
+    const text = settingsText();
+    const ok = await copyText(text);
+    if (!ok) console.log(TAG, 'settings:\n' + text);
+    toast(ok ? 'Settings copied' : 'Copy failed. The settings are in the console');
   }
   // While it runs, a see-through screen ('tcbench', no 'dim' look) holds only a status line at the top: the world and
   // HUD draw exactly as in play (the game's `show` doesn't depend on S.menu), the player can't move or look, and with
@@ -1167,9 +1337,9 @@
   }
   bus._runBench = opts => runBench(opts);
   bus._benchText = b => benchText(b);
-  function benchLine(cls, a, b, c, d, title) {
+  function benchLine(cls, a, b, c, title) {
     const first = h('span', { title: title || null }, T(a));
-    return h('div', { class: cls }, first, h('span', null, T(b)), h('span', null, T(c)), h('span', null, T(d)));
+    return h('div', { class: cls }, first, h('span', null, T(b)), h('span', null, T(c)));
   }
   function benchRows(TE) {
     const running = benchBusy || !!TE.bench.running;
@@ -1186,11 +1356,11 @@
       const partial = benchPartial(last);
       out.push(subhead('Last benchmark' + (partial ? ' (' + partial + ')' : '')));
       if (partial) out.push(h('p', { class: 'desc small tc-bench-partial' }, T(BENCH_PARTIAL_NOTE[partial])));
-      const tbl = h('div', { class: 'tc-bench' }, benchLine('tc-bench-head', 'Scenario', 'FPS', 'p95 ms', 'Scale'));
+      const tbl = h('div', { class: 'tc-bench' }, benchLine('tc-bench-head', 'Scenario', 'FPS', 'p95 ms'));
       for (const r of last.rows) {
         if (!r || typeof r !== 'object') continue;
         const name = String(r.name == null ? '?' : r.name);
-        tbl.append(benchLine('tc-bench-row', cap1(name), benchNum(r.fps, 1), benchNum(r.p95, 1), benchPct(r.scale), r.note ? name + ': ' + r.note : name));
+        tbl.append(benchLine('tc-bench-row', cap1(name), benchNum(r.fps, 1), benchNum(r.p95, 1), r.note ? name + ': ' + r.note : name));
       }
       out.push(tbl, h('p', { class: 'desc small tc-bench-env' }, T(benchEnv(last, false))));
       out.push(row(btn('Copy results', () => { copyBench(); })));
@@ -1231,7 +1401,7 @@
 
     if ('enabled' in c) out.push(toggle('Shaders', !!c.enabled, v => write({ key: 'enabled' }, v)));
 
-    // rows grouped under their section heading, in schema order; the benchmark follows the Performance rows
+    // rows grouped under their section heading, in schema order; the benchmark follows the Quality rows
     let benchShown = false;
     const groups = new Map();
     for (const f of schema) {
@@ -1254,7 +1424,7 @@
           out.push(cycle(label, f.options, c[f.key], v => { write(f, v); if (f.reload) reloadToast(); }));
         }
       }
-      if (hasBench && !benchShown && name === 'Performance') { out.push(...benchRows(TE)); benchShown = true; }
+      if (hasBench && !benchShown && name === 'Quality') { out.push(...benchRows(TE)); benchShown = true; }
     }
     if (!schema.length) out.push(note('This version of the shader script has no settings list.'));
     if (hasBench && !benchShown) out.push(...benchRows(TE));
@@ -1316,11 +1486,19 @@
     }
     if (isArmed('all')) { disarm('all'); resetAll(); } else arm('all', 'Reset all options');
   }
+  function copySettingsButton() {
+    const b = btn('Copy all settings', () => { copySettings(); });
+    b.setAttribute('data-tc', 'copy-settings');
+    return b;
+  }
   function aboutSection() {
     return [
       header('About'),
       note('Better Options v' + VERSION + '. Settings are saved automatically.'),
       note('Opened from the pause menu\'s Options button. Escape goes back.'),
+      sep(),
+      copySettingsButton(),
+      small('Your settings, script versions and GPU name as text, to share. No account details.'),
       sep(),
       armButton('all', 'Reset all options', onResetAllClick),
       small('Everything here, plus FOV 70 and render distance ' + defaultRd() + '.')

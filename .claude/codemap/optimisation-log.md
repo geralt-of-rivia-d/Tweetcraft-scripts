@@ -1,4 +1,4 @@
-# Optimisation log: shaders and benchmarking on this laptop (1.4.0 to 1.5.0-wip)
+# Optimisation log: shaders and benchmarking on this laptop (1.4.0 to 1.5.1)
 
 What was tried, what it measured, what the UHD 620 and ANGLE D3D11 taught us, and what to do next. Written
 2026-11-03 from the handovers and reports. The numbers for each machine are in `machine-profile.md`. This file holds
@@ -10,6 +10,7 @@ the history and the lessons. Read sections 2 to 4 before any shader or bench wor
   geometry, at rd 8.
 - [C]: `shaders-team/CONTRACTS.md`.
 - [PLAN]: `plans/okay-here-s-some-feedback-modular-pretzel.md`.
+- [R151]: `shaders-team/RESEARCH-1.5.1.md`, and the bench result at the end of `shaders-team/BRIEF-1.5.1.md`.
 - [P140]: `plans/i-need-you-to-sequential-plum.md`, the 1.4.0 plan, and commit `f7dde53`.
 
 Reports are `reports/bench-*.json`. Unless a row says otherwise, numbers are med / p95gb in ms, uncapped, d3d11 and
@@ -52,6 +53,19 @@ Reports are `reports/bench-*.json`. Unless a row says otherwise, numbers are med
 | 31 | Governor: 16 samples for **every** over-mark drop (not just after a raise) | SH5 govsim | govsim's start-up transient case 0.88 → 0.82: the first drop comes too late [SH5 §2] | dead end → 16 only after a raise (#28) |
 | 32 | Governor: 8-sample medians for a drop right after a raise (pre-SH5 rule) | SH4 → SH5 | under vsync the median of the first 8 read 14.2-14.7 while the stretch's median was ~12.5-13, so drops came ~0.5 s after each raise [SH5 §1] | replaced (#28) |
 | 33 | Governor review rounds (v8 and v9, after SH5's v7): capped drops need both real misses after the last scale change; the capped blind one-step drop is gated by `govHelps` (skipped when a fresh measurement shows the step down is not 0.3 ms cheaper, or the scale above not 0.3 ms costlier); `govReset` sets the settle frame too; v9: capped, the "staying" raise in the over-mark branch needs the scale above to measure no costlier at all (was +0.25 ms), a 0.3 ms dead band against `govHelps` | lead's review | govsim vs SH5's v-final: 78 of 79 cases identical, 1 not worse (v8 and v9); test-load 90/0 (v8). Not a speed change: it stops one pair of misses causing two drops, and a draw-bound frame ratcheting down to `renderScaleMin` (or cycling 1.0 ↔ 0.9) | kept |
+| 34 | Render scale, scene FBO, composite and Auto governor removed | 1.5.1 | Removal gains no speed: at scale 1 no FBO or composite was paid [R151 §2]. Title-screen accept, uncapped (`bench-final-1.5.1`; low and medium settled after 1 pass, the rest ran 3), median / p95gb2: low 9.7 / 12.70, medium 11.7 / 14.52, high 12.1 / 15.10, ultra 12.3 / 15.80, high-moving 12.2 / 15.17, ultra-moving 12.4 / 15.24: no slowdown against the v9 `+renderScale=1` rows, every row holds 60 | kept: the user wants 100% only |
+| 35 | The game's `flat` `vGlass` (build 6b3963e444) stripped to a smooth varying | SH 1.5.1 | Small and unconfirmed on the title screen: off 4.2 (1 pass) against vanilla 4.8 (3 passes) ms median in `bench-final-1.5.1`, but 5.00 against 5.15 in the 1-pass `bench-flat-strip-screen`. Not the ~3 ms predicted. Both rows also differ by our hooks, so this isn't a clean A/B of the strip | kept: required by the smoke guard, harmless. Water-heavy worlds unmeasured |
+
+**1.5.1: what the first real-world test changed** (2026-11-04; the code is in `scripts.md` §2):
+- **Every `npm run bench` number is a title-screen number.** The user's in-game benchmark of 1.5.0 in their own world read shaders off at 11.5 GPU ms (under a 60 Hz cap, so somewhat inflated by clock-down), against about 3.8 on the title. 1.5.0's "every preset holds 60" doesn't transfer to real worlds [R151 §1].
+- **Auto render scale went.** The user found it awful and asked for 100% only; they accept 45-50 FPS, with 60 as the goal. That figure for High in their spot is extrapolated, not measured [R151 §1].
+- **The game added a `flat` varying, and the prediction was wrong.** The lead predicted vanilla at 7.0-7.7 ms and off about 3 ms below it, taking the cost of our old `vCls`. Measured: vanilla 5.15 (first read 5.30), off 5.00 on the 1-pass screen run, then vanilla 4.8 (3 passes), off 4.2 (1 pass, settled by the adaptive rule) on the accept. So at most about 0.6 ms, unconfirmed, and no speed-up may be claimed for the strip.
+- **An unexplained vanilla reading stopped a release run.** `--strict` aborted the first accept run on vanilla 5.50 ms, twice, at a clean sysCpu of 41-44%. The lead blamed a stale calibration range from the new build. The next run read 4.8 with a clean preflight, which disproves that. The cause is unknown; the window may have been covered for some runs, and reports don't record window state.
+- **Unverified explanation:** only the translucent pass and stained depth read `vGlass`, so the opaque and cutout passes may not pay for it, unlike `vCls`, which every terrain pixel read. A world with a lot of water or glass could differ; nobody has measured that.
+- **Accept run, uncapped (`bench-final-1.5.1`):** see ledger #34. It was read by hand against the `+renderScale=1` rows of `bench-final-1.5-v9`, because `--compare` matches by row name, so `high` would compare with 1.5.0's Auto `high`. Ultra's p95gb2 is 0.11 ms worse, inside the noise. Its bench ran without `--strict` after the abort above, and its preflight passed anyway.
+- **Bench windows can run on a second virtual desktop** (`tools/bench-desktop.ps1`, `--prewarm N`). Measured with blank windows on Windows 11: a window opened after switching back lands on the active desktop, and `MoveWindowToDesktop` on another process's window returns 0x80070005. So all windows are opened up front, in about 6 s for 20. Whether a window Windows isn't drawing gives vsync numbers comparable to a visible one is judged below.
+- **Accept run, vsync:** the full pass (`bench-final-1.5.1-vsync`, 20 prewarmed windows, audits running in pass 1) read high 8.5% and ultra 11.9% miss, with vanilla inflated too, so it's excluded. Under clean conditions (`bench-ab-vsync-151`, `bench-final-1.5.1-vsync-clean`, 1 pass of 30 s, 5-7 windows) every row holds: 59.8-60 FPS, at most 0.06% miss, moving rows 0%. An A/B in the same conditions shows no regression: 1.5.0 at 100% read high 0.45% / 14.07 GPU ms and ultra 0.11% / 13.95, against 0% / 12.23 and 0% / 12.50 on 1.5.1 (one pass per row). What contaminated the full pass isn't separated: window count, audit load and the user viewing that desktop all changed together.
+- **The 1.5.1 acceptance command changed in two ways:** the accept's uncapped run dropped `--strict`, and vsync ran on a second desktop in pieces, not as the accept's own child pass. Both are recorded here because criteria were fixed before coding.
 
 **SH5: the frame-time tail and governor hunting under vsync** (Shaders 1.5.0; only `govern` and its helpers changed,
 no GLSL, preset, SCHEMA or API change; `scripts.md` §2 has the rules with line numbers, issue #60 is fixed):
@@ -143,7 +157,8 @@ the flat fix]:
   - **The render distance decides which conclusion holds.**
 - Draws grow 213 → 401 per frame from rd 8 to rd 12, and VAOs 590 → 1139 [LAB2]. Anything per draw, per vertex or
   per primitive scales with this.
-- **A `flat` varying costs 2.3-3 GPU ms at rd 12** (1.1 at rd 8).
+- **The `flat` varying `vCls`, read by every terrain pixel, cost 2.3-3 GPU ms at rd 12** (1.1 at rd 8).
+  - This doesn't generalise. The game's own `flat` `vGlass`, read only by the translucent pass and stained depth, measured far less: inside the noise floor on the title screen (ledger #35). The reason is unverified.
   - The cause is most likely ANGLE D3D11's provoking-vertex geometry-shader emulation: a per-primitive cost on every
     terrain draw [LAB2 §3].
   - The varying *count* doesn't matter: removing a whole vec3 gained nothing.
@@ -300,7 +315,7 @@ the flat fix]:
 
 1. **Sky after terrain** (1.6 carry-over). LAB estimated −1.2 to −1.4 ms at 1080p: patched sky 1.65-1.8 ms vs
    vanilla 0.6-0.7 [LAB].
-   - It is per pixel, so it adds to the DRS headroom.
+   - It is per pixel, so it adds to the frame's headroom.
    - Effort is medium-high: the sun and moon are two draws of one sprite program with per-draw uniforms, so they need
      uniform record and replay, and the replay must come before blended particles [SH (a)4].
    - It is the largest measured, unbanked win, and it pays for 1.6 effects.
@@ -318,19 +333,15 @@ the flat fix]:
    in §3.13, which could reorder everything above. Also open: the cause of vanilla's 2-5% long callbacks. The next
    lead is a CPU/GPU-process trace [PLAN].
 6. **The remaining off tax** (off 4.9-5.0 vs vanilla 4.4-4.7, i.e. 0.3-0.5 ms; `bench-sh4-final2`, `-sh5-v7`).
-   Register allocation of the big program, so it's small and hard.
+   Register allocation of the big program, so it's small and hard. On 6b3963e444 the one screen run read off 5.00 against vanilla 5.15, so re-read this after the accept run.
 7. **`mediump`.** Never measured, and likely 0 on D3D11. Measure it once if it's cheap to try.
 8. **In-game confirmations still owed.**
-   - Governor at real 60 Hz and 30 Hz (Energy Saver): #60 (hunting) is fixed by SH5 on the vsync traces; in game,
-     watch `debug().governor` drops/raises and expect about 0-3 changes/min at 0.98-1.0. Still open: #62 (`rf` stuck
-     at 30 Hz).
-   - F2 reading a mean (#61).
+   - F2 and F3 within 1 FPS at a steady rate (F2 now counts frames as the game does).
+   - Zoom in a real world, on High and Ultra: first press, quick taps and the wheel.
    - `NEAR_SPARE` softness (#64).
-   - The 1.5 repeat-3 acceptance, uncapped and vsync (BENCH4 §5).
+   - The 1.5.1 accept run, uncapped and vsync.
 
-**The budget for 1.6/1.7.** At rd 12, High Auto runs at about 11-12 ms median uncapped, with p95gb2 of 14.5-16 and
-vsync miss% ≤ 0.6 [SH5]. That leaves roughly 2-3 ms of median headroom to the 14 ms mark, before DRS. Every 1.6
-effect needs an on/off row at rd 12. Sky after terrain is the only known way to create more room.
+**The budget for 1.6/1.7.** Title-screen numbers at rd 12: High at 100% runs at about 12.2 ms median uncapped, with a p95gb2 of about 15 (`bench-final-1.5-v9`, `bench-flat-strip-screen`). That leaves about 1.8 ms of median headroom to the 14 ms mark, and no render scale absorbs the rest. A real world has less: see the 1.5.1 notes in §1. Volumetric light, lava heat shimmer and the 1.7 G-buffer need a scene framebuffer again, and droplet refraction needs scene colour. That costs a fixed 0.6-0.77 ms at 1080p and is a selective restore from `d73912c`, shaped for 100% rather than upscaling [R151 §2]. Every 1.6 effect needs an on/off row at rd 12 and an in-game check. Sky after terrain is the only known way to create more room.
 
 ## 6. Process lessons (where sessions lost the most time)
 

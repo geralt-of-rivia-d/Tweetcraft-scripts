@@ -34,6 +34,7 @@ they disagree, fix the map.
 │   ├── smoke.mjs                live game in headless Chrome + `runtime`/`shaders` expectations
 │   ├── probe.mjs                evaluate an expression in the live game, print JSON
 │   ├── bench.mjs                real-GPU benchmark: headed, uncapped 1920×1080 Chrome, scenarios → table + reports/bench-*.json
+│   ├── bench-desktop.ps1        runs a bench on a second virtual desktop (needs bench --prewarm N)
 │   ├── bench-history.mjs        one table of every saved bench report (npm run bench:history)
 │   ├── cloud.mjs                check/smoke in GitHub Actions on the working tree via a throwaway ci/* branch; minutes; status
 │   ├── dev-loaders.mjs          Tampermonkey dev loaders → dev/
@@ -85,7 +86,7 @@ How to read and trust its numbers:
   - `fps`, `ms`, `med` and `p95` are frame intervals from rAF timestamps. `low1` = 1000 / the mean of the slowest 1%; use it for relative comparisons only.
   - `cpuMs` = the time in all rAF callbacks of a frame.
   - `gpuMs` = `TIME_ELAPSED` around the frame. That is an upper bound, because it spans waits. `gpuSource` is `bench` (its own timer), `script per frame` (`Twitterentary.perf.gpuRing`) or `script mean`.
-  - `scale` / `scaleRange` = `perf.scale`; `refreshPerMin`; `errors[]`; `sysCpuPct`.
+  - `scale` / `scaleRange` = `perf.scale` (always 1 since Shaders 1.5.1); `refreshPerMin`; `errors[]`; `sysCpuPct`.
 - **Spikes and "holds 60":**
   - A spike frame has rAF callbacks ≥ 12 ms and callback − GPU ≥ 6 ms when a per-frame GPU time exists. Otherwise it is plain callback ≥ 12 ms, and `spikeRule` says which rule a row used. Don't compare a plain-rule row with a timer row blindly.
   - The GPU term matters because a GPU-bound frame also has a long callback: Chrome blocks the renderer in GL calls when the GPU falls behind. So the plain rule would drop exactly the slow GPU frames.

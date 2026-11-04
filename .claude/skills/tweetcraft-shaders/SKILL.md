@@ -33,7 +33,8 @@ Read first:
    `Array.prototype.indexOf('oak_planks')` hook, which stays installed. Each atlas layer is then classed as leaves,
    plants, water or emissive: by name first (`nameClass`), falling back to pixel statistics from `texImage3D` and
    animation from `texSubImage3D`. The classes go into a one-row RGBA8 texture `uClsTex` on **texture unit 7**
-   (1024 wide, or wider if there are more layers).
+   (1024 wide, or wider if there are more layers). The layer is 9 bits on build 6b3963e444: use `tcLayer`
+   (`layerDecl()`), never `int(aInfo.x)` alone.
 5. **Shadow pass.** `drawElements` sends terrain draws to `terrainDraw`, which records each chunk VAO (origin, index
    count, cutout) in `rec`. `renderShadow` redraws the recorded chunks within `shadowExtent` into a
    `shadowSize²` depth texture on **texture unit 6**. It runs every `shadowEvery` frames, or when the camera moves
@@ -50,9 +51,10 @@ Read first:
    for uniforms. Grep `shaders/` so a new name doesn't already exist in the game's GLSL.
 4. **Stay valid GLSL ES 3.00 with the game's precision.** Integer and bit ops need `highp` (`aPos` is a `uvec3`
    packed position). `dFdx`/`dFdy` are core in ES 3.00. Never write the `flat` qualifier in terrain GLSL, not even
-   in a comment: one flat varying costs 2.3-3 GPU ms at rd 12 on ANGLE D3D11, and smoke forbids it. The number of
-   varyings doesn't matter.
-5. **Samplers.** The game uses texture units 0–5 only, and 6 and 7 are ours. A sampler you add to a game shader
+   in a comment: smoke forbids it. The 1.5 betas' `vCls`, read by every terrain pixel, cost 2.3-3 GPU ms at rd 12 on
+   ANGLE D3D11. Don't quote that for every flat varying: the game's own `vGlass`, which we strip to satisfy the guard,
+   measured inside the noise floor on the title screen, for reasons unverified. The number of varyings doesn't matter.
+5. **Samplers.** The game uses texture units 0–5, its atlas pages begin at unit 8 (`PAGE_UNIT`), and we hold 6 and 7. A sampler you add to a game shader
    **defaults to unit 0**, where a `sampler2DArray` already sits. That's an `INVALID_OPERATION` on draw unless you
    `uniform1i` it to its unit after link (see `applyUniforms`). `Gfx.tex2d` leaves `TEXTURE1` active, so save and
    restore `ACTIVE_TEXTURE` around your own binds.
@@ -69,7 +71,8 @@ Read first:
    mandatory, never remove it.
 8. **Post-processing hooks:**
    - The game never binds framebuffers, so a mod FBO bound at frame start (the first GL call each frame is
-     `viewport`) captures every world draw.
+     `viewport`) captures every world draw. We have none since 1.5.1: 1.6 effects that need one restore it from
+     `d73912c`, shaped for 100%, and pay about 0.6-0.77 ms at 1080p.
    - The first-person hand pass clears depth mid-frame (`drawHeld`), so grab scene depth before that.
    - The HUD is a separate 2D canvas and is unaffected.
    - World rendering is camera-relative: `uVP` is rotation and projection only, and `uOrigin` is chunk origin minus
@@ -189,7 +192,7 @@ or two bench runs, not five. Before any bench:
 
 ```sh
 npm run bench:history -- --scenario "high*" --rd 12 --fov 80 --uncapped --latest
-npm run bench -- --protocol screen --script <copy> --scenarios vanilla,high+renderScale=1,high+renderScale=1+shadowRes=1024 --label scr-shadowres
+npm run bench -- --protocol screen --script <copy> --scenarios vanilla,high,high+shadowSize=1024 --label scr-shadowres
 npm run bench -- --protocol accept --script <copy> --scenarios vanilla,off,low,medium,high,ultra,high-moving,ultra-moving --label final-1.5b --compare reports/bench-baseline-1.4.0-rd12.json
 ```
 
@@ -205,7 +208,8 @@ Reading the result:
 - **Simulators and synthetic load screen, they don't accept.** Calibrate synthetic load against real play (the old
   `-moving` forced 1000+ redraws/min against a real 60-300), and take one real `--vsync` run before accepting
   anything a simulator (govsim) approved.
-- **The title screen is a lower bound** on in-world cost (no walking, no meshing). Confirm in game.
+- **The title screen is a lower bound** on in-world cost (no walking, no meshing). Every bench number is a title-screen
+  number, so say so when you quote one, and confirm in game.
 - **Don't retry a dead end** (log §4), unless the reason it failed no longer holds. Say why.
 - **Feed the knowledge back.** After an accept run, add the result to the optimisation log, and regenerate the
   machine profile from the reports (profile §9), so the next prediction is better.
