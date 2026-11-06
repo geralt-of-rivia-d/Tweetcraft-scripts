@@ -4,9 +4,9 @@ A collection of userscripts for [TweetCraft](https://tweetcraft.jai.vin). Instal
 
 ## Scripts
 
-- **Twitterentary shaders** - Adds shader-style lighting, sun shadows, waving plants, realistic water (see-through near you, reflective at a distance) and a dynamic sky. Pick a Quality and a Look preset or fine-tune each setting. The world is always drawn at your screen's full resolution. Every change applies instantly, with no reload, and K switches the shaders on and off (rebind it in Better Options' Keybinds tab).
+- **Twitterentary shaders** - Adds shader-style lighting, sun shadows, waving plants, realistic water (see-through near you, reflective at a distance) and a dynamic sky. Pick a Quality and a Look preset or fine-tune each setting. The world is always drawn at your screen's full resolution. Every change applies instantly, with no reload, and F2 switches the shaders on and off (rebind it in Better Options' Keybinds tab).
 - **Tweetcraft Zoom** - Hold a key (Z by default) to zoom in and adjust your FOV for a closer look. The zoom runs on its own timer, so it moves in even steps even when the frame rate drops, and quick taps always end back on your own FOV.
-- **Tweetcraft Better Options** - Adds a custom options menu for graphics, interface, keybinds, shaders, and zoom settings, with "Reset shaders" and "Reset all options" buttons and a shortcut to the game's own options (music, language and more). It also adds a performance overlay (F2), an in-game benchmark and a "Copy all settings" button. Works in every game language.
+- **Tweetcraft Better Options** - Adds a custom options menu for graphics, interface, keybinds, shaders, and zoom settings, with "Reset shaders" and "Reset all options" buttons and a shortcut to the game's own options (music, language and more). It also adds shader performance lines to the game's F3 screen, an in-game benchmark and a "Copy all settings" button. Works in every game language.
 - **Tweetcraft Chat History** - Minecraft-style chat history: press Up and Down to recall previously sent messages and commands.
 
 ## Notes
@@ -14,7 +14,7 @@ A collection of userscripts for [TweetCraft](https://tweetcraft.jai.vin). Instal
 - Every script runs only on `https://tweetcraft.jai.vin/*`.
 - **Tweetcraft Better Options** replaces the game's Options screen, from the pause menu and from the title screen. On the title screen the render distance setting applies when you join a world, and the HUD setting only works in a world. The other scripts expose their settings through it (shaders, zoom, keybinds), so install it alongside them for full configuration.
 - **Zoom key:** the default is now Z, because the game uses C. If you already set your own zoom key, it's kept, so a saved C stays on C and still clashes with the game: pick another one in the Keybinds tab.
-- **Keybinds tab** (Better Options): it now covers the mods' keys: shaders, zoom and the performance overlay.
+- **Keybinds tab** (Better Options): it now covers the mods' keys: shaders and zoom.
   - The game's own keys live in the game's Controls screen. The **Game controls…** button in the tab opens it.
   - **Upgrading from 1.3:** game keys you remapped here carry over to Controls once, by themselves, and a message says how many moved. A remap onto a key the game already uses for something else is skipped. So is a remap from a key a mod answers to, because that key would then do both things; the message names those keys. An action you had turned off goes back to its default key, because the game can't leave an action without one.
   - Binding a mod's key to a key the game or another mod also uses shows a warning, but the binding is kept.
@@ -23,14 +23,14 @@ A collection of userscripts for [TweetCraft](https://tweetcraft.jai.vin). Instal
   - **Look** (Natural, Vivid, Soft) sets the light and colour.
   - The two combine freely. The default is Medium + Natural.
   - A picker shows "Custom" once you change one of its settings yourself.
-  - Press K in game to turn the shaders on or off. The choice is saved. Rebind the key in the Keybinds tab.
+  - Press F2 in game to turn the shaders on or off. The choice is saved. Rebind the key in the Keybinds tab. F2 replaces K as the default, and a key you already set yourself is kept.
   - **Upgrading from 1.4.0:** if you used High or Ultra unchanged, it's switched to the new 2048 shadow resolution once, so it shows High or Ultra again instead of "Custom". Settings you changed yourself are kept.
   - **Upgrading from 1.5.0:** render scale is gone, along with its Auto and sharpening settings. The world is always drawn at 100%, and old saved values are ignored, so a saved Quality preset reads as that preset again. In heavy scenes the frame rate can now drop below 60 where 1.5.0 would have lowered the resolution.
   - If your graphics card can't hold all of the game's textures in one array, the terrain keeps the game's own look. The sky effects still work.
-- **Performance overlay** (Better Options): press **F2** in game, or turn on "Performance overlay" in Options, then Graphics. Rebind the key in the Keybinds tab.
-  - It shows FPS and frame time, CPU and GPU time per frame (GPU shows "n/a" when the browser has no GPU timer), a "CPU-bound" marker, and how often sun shadows are redrawn per minute.
-  - The FPS is counted the way the game's F3 counts it, so at a steady frame rate F2 and F3 agree to within 1 FPS. With Shaders older than 1.5.1 it shows an average instead.
-  - It sits below the game's top-right buttons (or in the corner while the HUD is hidden), clear of the game's F3 debug text.
+- **Performance on the F3 screen** (Better Options): press the game's **F3**. With the shaders script installed, two lines follow the game's own `Frame:` line:
+  - `Shaders:` shows CPU and GPU time per frame (GPU shows "n/a" when the browser has no GPU timer), plus a "CPU-bound" marker.
+  - `Shadows:` shows how often sun shadows are redrawn per minute, or "off" when sun shadows are switched off.
+  - FPS and frame time are already on the game's own lines, so they aren't repeated.
 - **In-game benchmark** (Better Options): Options, then Shaders, then **Run benchmark**.
   - It measures, where you stand, your current settings, shaders off, and the Low, Medium, High and Ultra presets, in about a minute. Don't move while it runs.
   - **Escape stops it.** Leaving fullscreen or resizing the window stops it too, because the numbers would no longer compare. The rows finished so far are kept and marked as a stopped run.

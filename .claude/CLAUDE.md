@@ -161,7 +161,6 @@ Notable ones:
 - `patchCloud()` never matches (double-escaped regexes), and its inserted `'\\n'` would break GLSL once the regexes
   are fixed. It's marked `known` in `compat/expectations.mjs`.
 - Better Options scales the HUD hint and the tab player list twice when UI scale isn't 1 (#45).
-- The shaders' default K overlaps the game's blueprint "keep" key. The user accepted this; it can be rebound (`tc.shaders.toggle`).
 - Zoom's default is `KeyZ` since 1.1.2. A stored `KeyC` still wins and keeps the clashes with blueprint paste, creative hotbar save and undo confirm.
 - GLSL trap: never write `flat ` in terrain GLSL, not even in a comment. Our own flat varying read by every terrain pixel cost ~2.3-3 GPU ms at rd 12
   on ANGLE D3D11, and smoke forbids the string.

@@ -1,12 +1,12 @@
 # Game UI codemap: screens, CSS, HUD, input
 
-Verified against game build f6b38f505d on 2026-11-06 (re-verified from c25d4c024d, itself from 6b3963e444, itself from 575c9209bc, 325afb04b5, c111547912 and d7bde3deb9, which had the same game code as b4bc035ec8 and 26479914e5). f6b38f505d changed main.js, menus.js, inventory.js, blueprint-ui.js, style.css (appended rules only, for the Controls screen) and `survival/*`, and added `keys.js` and `controls.js`; index.html, ui.js and i18n.js are byte-identical to c25d4c024d's. c25d4c024d changed main.js, menus.js, ui.js, style.css (two selectors, for `#recipesearch`) and `survival/*`, and added `blueprint-ui.js`, `sound-cats.js`, `survival/hotbars.js` and `survival/recipe-book.js`. Re-verify the sections whose files appear in a newer snapshot's changes, then update this id. `npm run check` warns while it isn't the latest build.
+Verified against game build b10d551d41 on 2026-11-06 (re-verified from f6b38f505d, itself from c25d4c024d, itself from 6b3963e444, itself from 575c9209bc, 325afb04b5, c111547912 and d7bde3deb9, which had the same game code as b4bc035ec8 and 26479914e5). b10d551d41 changed main.js, menus.js (one line, the Blueprints button), blueprint-ui.js, lang/en.js and `survival/{client,clicks}.js`; index.html, style.css, ui.js, keys.js and i18n.js are byte-identical to f6b38f505d's. f6b38f505d changed main.js, menus.js, inventory.js, blueprint-ui.js, style.css (appended rules only, for the Controls screen) and `survival/*`, and added `keys.js` and `controls.js`; index.html, ui.js and i18n.js are byte-identical to c25d4c024d's. c25d4c024d changed main.js, menus.js, ui.js, style.css (two selectors, for `#recipesearch`) and `survival/*`, and added `blueprint-ui.js`, `sound-cats.js`, `survival/hotbars.js` and `survival/recipe-book.js`. Re-verify the sections whose files appear in a newer snapshot's changes, then update this id. `npm run check` warns while it isn't the latest build.
 
-Paths are relative to `game/prod/<LATEST>/` (the folder named in `game/prod/LATEST`), and line numbers are those of build f6b38f505d's `pretty/`, moved from c25d4c024d with a line diff of the two snapshots.
+Paths are relative to `game/prod/<LATEST>/` (the folder named in `game/prod/LATEST`), and line numbers are those of build b10d551d41's `pretty/`, moved from f6b38f505d with a line diff of the two snapshots.
 - `M` = `menus.js`.
 - `S` = the game state object (`main.js:188`).
-- `G` = the host object main.js gives menus.js (`main.js:3308`, via `initMenus`).
-- Neither `S` nor `G` is global, but since f6b38f505d `M.kit().G` reaches both (§5). `window.__mc` exists only on DEV hosts (`main.js:3483`).
+- `G` = the host object main.js gives menus.js (`main.js:3312`, via `initMenus`).
+- Neither `S` nor `G` is global, but since f6b38f505d `M.kit().G` reaches both (§5). `window.__mc` exists only on DEV hosts (`main.js:3493`).
 
 **Since c111547912 every label is localised.** Menus, HUD buttons, dialogs and canvas text use `T(key)` from `js/i18n.js` (13 locales, chosen by `mc.lang` or the browser). The English strings are the same as before, so English selectors still match in `en` but not in other locales. See §7 and game-core.md §9.
 
@@ -36,7 +36,7 @@ Paths are relative to `game/prod/<LATEST>/` (the folder named in `game/prod/LATE
 - `refresh(...names)` `M:156`: calls `S.menu()` again and replaces `.inner`'s children.
   - No-op when there is no menu, when `menuName==='inv'`, or when `names` is given and doesn't include the current screen.
   - Keeps `#screen.scrollTop`, the scroll of the `.servers` and (new in f6b38f505d) `.keylist` lists, and the focus and selection of the focused element, matched by its `data-k`.
-- `closeMenu()` `M:179`: clears `S.menu`/`S.menuName`, sets `#screen.className=""`, empties `.inner`, runs `updateTop`. It does **not** re-lock the pointer or focus `#gl`. `resume()` (`main.js:3086`, not exported) does both.
+- `closeMenu()` `M:179`: clears `S.menu`/`S.menuName`, sets `#screen.className=""`, empties `.inner`, runs `updateTop`. It does **not** re-lock the pointer or focus `#gl`. `resume()` (`main.js:3090`, not exported) does both.
 - `back()` `M:249`: there is **no screen stack**, unchanged in c111547912. It's a hard-coded chain:
   1. `S.closed` → `location.reload()`
   2. claim/pending → stay put
@@ -50,7 +50,7 @@ Paths are relative to `game/prod/<LATEST>/` (the folder named in `game/prod/LATE
 
   An unknown (custom) name lands on step 8, `openPause()`, in a world, and on step 6, `showTitle()`, on the title page. So Options' Done (`back`) returns to the pause menu in a world and to the title on the title page.
 - `showMessage(title, text, buttons=[[T("menu.back"), back]])` `M:201`: a generic dialog (name `msg`, look `dim`). Each button is `[label, fn | url-string (rendered as <a target=_blank>) | {at, run} retry]`.
-- Escape while any screen is open (`main.js:2674`): `pause` → `resume()`, otherwise `M.back()`. Ignored when `S.closed`, on a card, and on `title`/`death`.
+- Escape while any screen is open (`main.js:2678`): `pause` → `resume()`, otherwise `M.back()`. Ignored when `S.closed`, on a card, and on `title`/`death`.
 - The `look` values in use: `dim` = `rgba(16,16,16,.62)` (`style.css:86`); `blur` = `.4` black + `backdrop-filter:blur(5px)` (`:92`); `title`; `card`; `death` (style injected as `#deathcss`); `endcredits`; `blur servers-menu`.
 
 **All screens** (name · opener · look · contents):
@@ -67,19 +67,19 @@ Paths are relative to `game/prod/<LATEST>/` (the folder named in `game/prod/LATE
 | `sounds` | `openSounds()` `M:1883` (new in c25d4c024d, exported) | dim | title, then one slider for each of `CATS` (`sound-cats.js:1`): `div.fov-control > input[type=range][data-k=vol-<cat>]`, 0–100, for master, music, weather, block, hostile, neutral, player, ambient and voice; Done → `openOptions` |
 | `controls` | `openControls()` `controls.js:44` (new in f6b38f505d, exported; imported by menus.js) | dim | title, a scrolling `.keylist` of `.keycat` headings and `.keyrow`s, then Reset Keys and Done. Details below the table |
 | `pause` | `openPause()` `M:1921` | dim | "Game Menu". Details below the table |
-| `blueprints` | `openBlueprints()` `blueprint-ui.js:45` (new in c25d4c024d; opened from the pause menu's Blueprints button) | dim | set corners A and B, name, save and copy a link, load a link, "My blueprints". Picking a corner or placing a ghost closes the screen and runs in the world (§5) |
+| `blueprints` | `openBlueprints()` `blueprint-ui.js:80` (new in c25d4c024d; opened from the pause menu's Blueprints button) | dim | set corners A and B, name, save and copy a link, load a link, "My blueprints". Picking a corner or placing a ghost closes the screen and runs in the world (§5). Since b10d551d41 a survival player without creative rights gets no corner or save rows, Guide replaces Paste, and a "Clear build guide" button shows while a guide is anchored |
 | `achievements` | `openAchievements` `M:1976` (private) | dim | `.achlist` of `.ach[.on]` |
 | `players` | `openPlayers` `M:2016` (private) | dim | `.row.p` rows: face canvas, `.who`, country mark |
 | `verify` | `openVerify(fromGame)` `M:2066` | dim | post on 𝕏, paste link `[data-k=pv]` |
 | `claim` / `pending` | `openClaim` `M:2093` / `openPending` `M:2108` | dim | publish the world / wait for verification (back is blocked) |
-| `owner` | `openOwner(fromGame)` `M:2291` | dim | Owner/Admin tools: rename `[rn]`, lock, kick/ban, roles (`wladd`, `opadd`), whitelist, **named roles** with per-role permissions (`buildNamedRoles` `M:2545`, `PERMS` in `rules/roles.js`), **world rules** from the `RULE_ROWS` table (`M:2636`, built by `buildRules` `M:2660`; a row shows only when the `roles` reply has that field, and it sends `{t:"rule",k,v}` through `ruleSet` `M:2425`, no longer a chat command), **Translate all chat** and **Music** (rules too), undo builders (`S.room.caps.undo`), Reset world. Sections are gated by `can(perm)` `M:2428`, and non-owners with a menu permission can open this screen (`staff()`, `main.js:1554`) |
+| `owner` | `openOwner(fromGame)` `M:2291` | dim | Owner/Admin tools: rename `[rn]`, lock, kick/ban, roles (`wladd`, `opadd`), whitelist, **named roles** with per-role permissions (`buildNamedRoles` `M:2545`, `PERMS` in `rules/roles.js`), **world rules** from the `RULE_ROWS` table (`M:2636`, built by `buildRules` `M:2660`; a row shows only when the `roles` reply has that field, and it sends `{t:"rule",k,v}` through `ruleSet` `M:2425`, no longer a chat command), **Translate all chat** and **Music** (rules too), undo builders (`S.room.caps.undo`), Reset world. Sections are gated by `can(perm)` `M:2428`, and non-owners with a menu permission can open this screen (`staff()`, `main.js:1557`) |
 | `msg` | `showMessage` `M:201` | dim | dialogs: reset confirm (`confirmReset` `M:2848`), disconnected, voice, playing in another tab |
 | `card` | `main.js:822` | card | logo only (`?card` preview) |
 | `wardrobe` | `wardrobe.js:780` | dim | Skins & VIP |
 | `death` | `survival/player.js:471` | death | You died!/Game over!, score, Respawn, Title screen (disabled for the first 1 s) |
 | `credits` | `survival/end.js:113` | endcredits | End credits (all keys swallowed, `end.js:205`) |
 | `spawn-onboarding` | `survival/onboarding.js:68` | dim | "Spawn is protected", buttons with `[data-spawn-action]` |
-| `inv` / `sinv` | `main.js:3200` / `:3209` | — | pseudo-menus with `S.menu = () => []`, shown while the `#inv` canvas is open. `#screen` does not get `.on`. The survival anvil is a `sinv` container window plus `#anvil-name` |
+| `inv` / `sinv` | `main.js:3204` / `:3213` | — | pseudo-menus with `S.menu = () => []`, shown while the `#inv` canvas is open. `#screen` does not get `.on`. The survival anvil is a `sinv` container window plus `#anvil-name` |
 
 **Controls details** (`controls.js`, new in f6b38f505d):
 - Each `.keyrow` is a `.keyname`, a key button `.mcb.key[data-k="key-<bindId>"]` with `aria-label` `"<name>: <key>"`, and a `.mcb.keyreset` button that is disabled at the default. A clashing bind gets `.clash` and a red label (`conflicts()`, keys.js:122).
@@ -90,10 +90,10 @@ Paths are relative to `game/prod/<LATEST>/` (the folder named in `game/prod/LATE
 **Options details** (`M:1811-1881`):
 - `.fov-control` is **not unique**: every slider on `sounds` reuses it. Select the FOV slider by `[data-k=fov]` and a volume by `[data-k=vol-<cat>]`. `[data-k=music]` no longer exists.
 - The FOV `input` handler writes `mc.fov` (`M:1827`).
-- A `sounds` slider calls `G.setVolume(cat, v/100)` (`main.js:3313`): music goes through `music.setVolume` (`mc.musicVol`), anything else through `saveVolume` (`mc.vol.<cat>`), and the new levels are then pushed to sound.js, music and voice.
+- A `sounds` slider calls `G.setVolume(cat, v/100)` (`main.js:3317`): music goes through `music.setVolume` (`mc.musicVol`), anything else through `saveVolume` (`mc.vol.<cat>`), and the new levels are then pushed to sound.js, music and voice.
 - Translate chat calls `G.translator.setOn(!on)`, which writes `translateChat`.
 - Language calls `chooseLanguage()` (lang-select.js:37), then `refresh("options")`. Without Sojo it steps to the next `LOCALES` entry and writes `mc.lang`.
-- The game refreshes `options` itself on `room` messages (`main.js:2153`) and once the music manifest has loaded (`onChange`, `main.js:325`; it no longer adds anything to this screen).
+- The game refreshes `options` itself on `room` messages (`main.js:2156`) and once the music manifest has loaded (`onChange`, `main.js:325`; it no longer adds anything to this screen).
 
 The pause screen's buttons, in order:
 1. Back to Game.
@@ -101,7 +101,7 @@ The pause screen's buttons, in order:
 3. Players: N (plus Achievements when `S.room.caps.ach`).
 4. Skins.
 5. Claim here (new in 6b3963e444; signed in only; sends `/claim`).
-6. Blueprints (new in c25d4c024d; only when `S.gm`).
+6. Blueprints (new in c25d4c024d; since b10d551d41 for every player, not only with `S.gm`).
 7. `Options…`.
 8. `Distance: N`, with Fullscreen beside it when available.
 9. A status line.
@@ -141,7 +141,7 @@ Other exports: `kit` (`M:132`: returns `{btn, title, P, row, field, showScreen, 
 | key | where | meaning |
 |---|---|---|
 | `mc.fov` | `main.js:210-213`, `M:1827` | base FOV. The loader only accepts 30–110, anything else becomes 70 |
-| `mc.rd` | `main.js:235`, `:3271` | render distance ∈ `RDS=[4,6,8,10,12]` (`view.js:1`), default 8 (6 on touch) |
+| `mc.rd` | `main.js:235`, `:3275` | render distance ∈ `RDS=[4,6,8,10,12]` (`view.js:1`), default 8 (6 on touch) |
 | `mc.heldLight` | `main.js:208`, `M:1843` | `"0"` turns off held-item light |
 | `mc.refill` | `M:1852-1857`, `survival/player.js:126` | **new in 6b3963e444.** `"0"` turns off hotbar refill (the "Auto-refill" button) |
 | `mc.showCountry` | `country.js:2`, `M:1848` | `"0"`/`"1"`, share your country flag |
@@ -149,27 +149,28 @@ Other exports: `kit` (`M:132`: returns `{btn, title, P, row, field, showScreen, 
 | `mc.musicVol` | `music.js:3` | **new.** Music volume 0–1 (default 0.5) |
 | `mc.vol.<cat>` | `sound-cats.js:12` (`KEY`), `G.setVolume` | **new in c25d4c024d.** Volume 0–1 of every sound category except music (default 1). Music keeps `mc.musicVol` |
 | `mc.hotbars` | `survival/hotbars.js:4` | **new in c25d4c024d.** Saved hotbars as JSON: 9 entries, written by C + digit, read by X + digit |
-| `mc.bpLink` | `blueprint-ui.js:6` | **new in c25d4c024d.** A blueprint link from `?bp=`, kept until it is used |
+| `mc.bpLink` | `blueprint-ui.js:19` | **new in c25d4c024d.** A blueprint link from `?bp=`, kept until it is used |
+| `mc.bpGuide.<room>` | `blueprint-ui.js:37` (`GUIDE`) | **new in b10d551d41.** The anchored survival build guide as JSON `{id, at, q, dim}` |
 | `mc.keys` | `keys.js:1` (`KEYS_KEY`) | **new in f6b38f505d.** The user's key binds as JSON `{bindId: code}`, non-defaults only. Not a secret; not the `mc.key.<room>` family |
 | `translateChat` | `chat-translate.js:3` | **new, no `mc.` prefix.** `"1"`/`"0"` = your Translate chat choice; absent = follow the world's setting |
 | `mc.hotbar` | `state.js:6,17` | creative hotbar as JSON (9 ids) |
 | `mc.sid` / `mc.tok` / `mc.bridged` | `main.js:170,172`, `identity.js:25-26` | session id / login token JSON / token already bridged to a cookie |
 | `mc.key.<room>` / `mc.admin` / `mc.nonce` | `main.js:173,180`, `M:2056` | owner key per world (also drives the "My worlds" filter, `M:550`) / admin key / verify nonce |
 | `mc.recent` | `recent.js:1` | recently played worlds |
-| `mc.voiceOff` / `mc.voiceNotice` | `main.js:1900,3437` | voice opt-out / voice notice seen |
+| `mc.voiceOff` / `mc.voiceNotice` | `main.js:1903,3447` | voice opt-out / voice notice seen |
 | `mc.cos` / `mc.wardrobe` | `wardrobe.js:81,84` | cosmetics ticket cache / has a wardrobe |
 | `mc.adseen` | `sojo-ads.js:131` | ad impressions, kept 2 h |
 
-New in 325afb04b5, in **sessionStorage**: `mc.glreload` (main.js:2795-2798), the time of the last automatic reload after a lost WebGL context (at most one per 60 s).
+New in 325afb04b5, in **sessionStorage**: `mc.glreload` (main.js:2799-2802), the time of the last automatic reload after a lost WebGL context (at most one per 60 s).
 
 ## 3. Styling system (`pretty/style.css`, `main.js` `resize()`)
 
 - **CSS variables.** Defaults are in `:root` `style.css:6` (`--u:2px --d:1.5px --hp:1px --hb:44px`). `resize()` `main.js:490` sets all four on `documentElement.style` (`:535-538`). It runs:
   - at boot;
-  - **deferred to the start of the next frame** after a window `resize`, a `fullscreenchange` (again 300 ms later) or a `visualViewport` resize. The listeners only call `wantResize()` (`main.js:557-560`; listeners at `:2783` and `:2806-2810`), and `frameBody()` runs `if (resize()) M.refresh()` first thing (`:610-612`);
+  - **deferred to the start of the next frame** after a window `resize`, a `fullscreenchange` (again 300 ms later) or a `visualViewport` resize. The listeners only call `wantResize()` (`main.js:557-560`; listeners at `:2787` and `:2810-2814`), and `frameBody()` runs `if (resize()) M.refresh()` first thing (`:610-612`);
   - also deferred (new in 325afb04b5) after `regainCanvases()` and after a 2D canvas's `contextrestored` (game-core.md §4);
   - when `#inv` shows or hides (`invStale`, new in 6b3963e444, `main.js:471`): `#inv` is sized like `#hud` only while it's shown and is 1×1 while it has `.off`. `frameBody` checks it at the top and again before `inv.draw` (`:609`, `:664`). `openInventory` sizes the inventory from `hudCanvas`, because `#inv` can still be 1×1 at that moment;
-  - on every `setInput()` (`:2367`);
+  - on every `setInput()` (`:2371`);
   - when a pixelated menu opens or closes (`:676`).
 - With `full=devicePixelRatio` and `dpr=backingDpr(full, innerWidth, innerHeight)` (`frameloop.js:24`: `min(full,2)`, lowered so the backing store stays ≤ 3840×2160):
   - `--u` = `max(1, round(raw*full))/full` px, where `raw = max(TOUCH?2:1, min(3, innerWidth/280, innerHeight/190))`. This is CSS px per GUI px, snapped to device pixels. It is also `G.UI.u`.
@@ -189,7 +190,7 @@ New in 325afb04b5, in **sessionStorage**: `mc.glreload` (main.js:2795-2798), the
   - 200×20 `--u`, border-image `url(/assets/gui/button.png) 3 fill / calc(3*var(--u))`.
   - Hover and focus-visible switch to `button_highlighted.png` and swap the label canvases (`.lo` hidden, `.hi` shown).
   - `:disabled` uses `button_disabled.png`.
-  - Widths: `.half` 98, `.wide` 148. **Changed in c111547912:** `.third` is `width:auto; min-width:64u; max-width:30vw; padding:0 4u`, and `.small` is `width:auto; min-width:60u; max-width:46vw; padding:0 4u` (`:324-335`), so they grow with longer translated labels. `.hb` `:770` is auto width × 18 `--hp`. `#hudleft.stack` (`:763`) stacks the left HUD buttons when they would overlap the right ones (`fitTop`, `main.js:2378`).
+  - Widths: `.half` 98, `.wide` 148. **Changed in c111547912:** `.third` is `width:auto; min-width:64u; max-width:30vw; padding:0 4u`, and `.small` is `width:auto; min-width:60u; max-width:46vw; padding:0 4u` (`:324-335`), so they grow with longer translated labels. `.hb` `:770` is auto width × 18 `--hp`. `#hudleft.stack` (`:763`) stacks the left HUD buttons when they would overlap the right ones (`fitTop`, `main.js:2382`).
 - **Other assets:**
   - `/assets/gui/`: `hotbar.png`, `hotbar_selection.png`, `crosshair.png`, `toast.png`, `inv/*`, `panel/*`, `container/*`.
   - `/assets/atlas/gui.json` + `gui.webp`: survival sprites.
@@ -219,13 +220,13 @@ New in 325afb04b5, in **sessionStorage**: `mc.glreload` (main.js:2795-2798), the
 
 ## 4. HUD (canvas, `pretty/js/ui.js` `Hud`, `survival/*`)
 
-- **Per-frame order.** `frame()` `main.js:593` → `frameBody()` `:608` → `render()` `:847` → `gfx.draw` → `hud.draw(o)` `:1030` → `survival.drawHud(hud, font, UI.gs)` `:1058` (only when `show`) → `drawUndoPreview` `:1059` → `hud.suggestions(UI.gs)` `:1060` → `chatToggle.update(...)` `:1061`. After `render()`, `music.update`, `inv.draw` / `survival.screens.draw()` paint the `#inv` canvas, then `updateAdvancement`.
+- **Per-frame order.** `frame()` `main.js:593` → `frameBody()` `:608` → `render()` `:847` → `gfx.draw` → `hud.draw(o)` `:1033` → `survival.drawHud(hud, font, UI.gs)` `:1061` (only when `show`) → `drawUndoPreview` `:1062` → `hud.suggestions(UI.gs)` `:1063` → `chatToggle.update(...)` `:1064`. After `render()`, `music.update`, `inv.draw` / `survival.screens.draw()` paint the `#inv` canvas, then `updateAdvancement`.
 - `Hud.draw` **runs every frame, title screen included, and clears the canvas first.** It returns right after clearing when `!o.show`, where `show = S.started && S.showHud && !CARD` (`:898`).
-- `drawUndoPreview` also draws the blueprint hints since c25d4c024d (`BP.hud`, when `BP.active()` or `BP.busy()` and no menu is open). They are canvas text, so nothing in the DOM shows them.
+- `drawUndoPreview` also draws the blueprint hints since c25d4c024d (`BP.hud`, when `BP.shows()` and no menu is open; `shows()` is new in b10d551d41 and also covers the build guide's progress and materials lines). They are canvas text, so nothing in the DOM shows them.
 - **`gs` / `s`** is device px per GUI px on `#hud`, whose size is `innerWidth×innerHeight×dpr` (the `backingDpr` above).
 - **The `Hud` instance** (`ui.js:631`) is constructed at `main.js:372`.
   - Properties: `c` (canvas), `x` (2D context), `font`, `sp` (`{hotbar, sel}` images), `icons`, `rect`, `chatLayout`, `suggest`, `suggestRect`, `chatFirst`.
-  - `icons` is a `SurvivalIcons` from `main.js:367`, whose `decorate()` draws stack counts. Survival swaps in its own at `survival/client.js:71`.
+  - `icons` is a `SurvivalIcons` from `main.js:367`, whose `decorate()` draws stack counts. Survival swaps in its own at `survival/client.js:72`.
 - **`draw(o)` `ui.js:640`** reads these fields of `o`:
 
   | field | meaning | field | meaning |
@@ -245,7 +246,7 @@ New in 325afb04b5, in **sessionStorage**: `mc.glreload` (main.js:2795-2798), the
   - Held item name at `hy−13s−lift`; toast at `hy−25s−lift`.
   - Chat lines stack upward from `hy−lift−16s` (`28s` when a toast is showing), 9s each, width `min(320s, W−4s)`, background `rgba(0,0,0,.5)`. Sets `this.chatLayout = {left, top, baseline, scale}`.
   - Then `chatField`, debug lines (top-left, from `2s + debugY`, ui.js:731-732), `hint`, `tab`.
-- **F3 debug** (`debugLines`, main.js:1158; drawn only while `S.debug`). The lines, in order:
+- **F3 debug** (`debugLines`, main.js:1161; drawn only while `S.debug`). The lines, in order:
   1. `Tweetcraft (<host>)`;
   2. `N fps, N chunks, N particles`;
   3. `Display: WxH at N.NNx[, fullscreen]` (`#gl`'s backing size and `UI.dpr`);
@@ -253,10 +254,10 @@ New in 325afb04b5, in **sessionStorage**: `mc.glreload` (main.js:2795-2798), the
   5. **changed in c25d4c024d:** `Frame: x ms (worst w, >50ms: n), JS y ms`. That is the mean rAF interval, the worst interval of the last second, how many intervals passed 50 ms, and the mean JS time in the frame callback;
   6. **new:** `Watch: usual N fps, regained R, lost L[, still slow: reload]`: the slow-frame watchdog's baseline ("?" until it has 8 samples), canvas reallocations and lost contexts (game-core.md §4);
   7. **new:** `Ping: N ms` (`net.rtt`) and `Remesh: n/s, x ms/s, max y ms` (`remeshSched.last`);
-  8. **new in f6b38f505d:** `last slow N ms (T s ago): <top 4 phases>` (`ft.line`, main.js:1173, game-core.md §4) and, while any slow frame is kept, the hint `T("debug.copySlow")`. Both are empty lines before the first slow frame;
+  8. **new in f6b38f505d:** `last slow N ms (T s ago): <top 4 phases>` (`ft.line`, main.js:1176, game-core.md §4) and, while any slow frame is kept, the hint `T("debug.copySlow", {key})`, which names the live `copySlow` key since b10d551d41. Both are empty lines before the first slow frame;
   9. `Heap: used / limit MB` (an empty line without `performance.memory`);
   10. then `XYZ`, `Block`, `Chunk` and the rest.
-  - `debugY` now comes from `debugTop()` (main.js:1151): the bottom of `#hudleft` (when `#hudtop` is shown) or of a visible `#world-sponsors` (+4 px), whichever is lower, in `#hud` pixels. Before 325afb04b5 only `#hudleft` counted.
+  - `debugY` now comes from `debugTop()` (main.js:1154): the bottom of `#hudleft` (when `#hudtop` is shown) or of a visible `#world-sponsors` (+4 px), whichever is lower, in `#hud` pixels. Before 325afb04b5 only `#hudleft` counted.
   - The block takes the top-left of `#hud` from that y down, about 26 lines × 9 GUI px. A mod overlay should sit elsewhere (top-right, say) or hide while F3 is on (`S.debug`, readable once `S` is captured, §5).
 - **Methods.**
   - `chatField(o, s, pad)` `:743` draws the chat input at `H−pad−14s` with caret, selection, ghost suggestion and the IME underline.
@@ -264,7 +265,7 @@ New in 325afb04b5, in **sessionStorage**: `mc.glreload` (main.js:2795-2798), the
   - `hint(text, s, above)` `:854` sits below the crosshair at `H/2+20k`, or at `H*.32` when `above`, shrinking `k` until it fits.
   - `tab(t, s)` `:869` is the player list, centered at the top in columns of up to 20.
   - `drawLoading(c, font, dirt, o)` `:925` draws the `#load` screen.
-- **Survival.** `SurvivalClient.drawHud(hud, font, gs)` `survival/client.js:366` → `drawCounts` `:562` (stack numbers on the hotbar) → each system's `drawHud`:
+- **Survival.** `SurvivalClient.drawHud(hud, font, gs)` `survival/client.js:390` → `drawCounts` `:586` (stack numbers on the hotbar) → each system's `drawHud`:
   - `PlayerClient.drawHud` `survival/player.js:413` → `SurvivalHud.draw(ctx, font, s, rect, st)` `survival/hud.js:28`.
     - It draws hearts, absorption, armor, food, air, the XP bar and level, and the attack indicator under the crosshair. Positions are relative to `hud.rect`.
     - Atlas sprite names are `hud/heart/*`, `hud/food_*`, `hud/armor_*`, `hud/experience_bar_*`.
@@ -275,61 +276,61 @@ New in 325afb04b5, in **sessionStorage**: `mc.glreload` (main.js:2795-2798), the
   - `EndClient` `end.js:278`: boss bar at the top.
   - `CycloneClient` `cyclone.js:18` (new in c25d4c024d): the cyclone's boss bar at the top, moved down 22 GUI px while the dragon's bar shows in the End.
 
-  `SurvivalClient.lift` `client.js:385` is the largest `lift` among its systems (24 from `player.js:55`).
+  `SurvivalClient.lift` `client.js:409` is the largest `lift` among its systems (24 from `player.js:55`).
 - **DOM HUD parts.**
-  - `#cross` gets `.off` toggled every frame (`main.js:1028`): it's hidden when a menu is open, in third person, or with the HUD off. It's sized `15*gs/dpr` in `resize`, with `mix-blend-mode:difference`.
-  - `#hudtop`: `buildTop()` `main.js:2387` calls `replaceChildren` on both sides. Labels are `T("hud.*")`/`T("vc.*")`.
+  - `#cross` gets `.off` toggled every frame (`main.js:1031`): it's hidden when a menu is open, in third person, or with the HUD off. It's sized `15*gs/dpr` in `resize`, with `mix-blend-mode:difference`.
+  - `#hudtop`: `buildTop()` `main.js:2391` calls `replaceChildren` on both sides. Labels are `T("hud.*")`/`T("vc.*")`.
     - `#hudleft`: "≡" (aria `T("hud.menu")`, "Menu"), then one of Save your progress [V] (signed out), Owner/Admin tools [O] (owner or op) or Make your own world [M], then the voice buttons.
     - `#hudright`: Play in new tab (framed only), Inventory [E], Chat [T].
-    - It is rebuilt at `:404,417,548,1616` (locale change)`,1897,2009,2167,2338,2350`. `updateTop()` `:2372` shows and hides it through the `hidden` attribute, then `fitTop()`.
-  - `#adv`: `showAdvancement` `:1678`, a 160×32 GUI px `toast.png` that slides in for 5 s. Long names now wrap to two lines (`wrapText`), and it repaints when glyphs load.
+    - It is rebuilt at `:404,417,548,1619` (locale change)`,1900,2012,2170,2342,2354`. `updateTop()` `:2376` shows and hides it through the `hidden` attribute, then `fitTop()`.
+  - `#adv`: `showAdvancement` `:1681`, a 160×32 GUI px `toast.png` that slides in for 5 s. Long names now wrap to two lines (`wrapText`), and it repaints when glyphs load.
 
 ## 5. Input (`pretty/js/main.js`)
 
-- **Listeners** are registered in `bindInput()` `:2759`, called from `boot()` (`:405`) after assets load and before the network connects:
+- **Listeners** are registered in `bindInput()` `:2763`, called from `boot()` (`:405`) after assets load and before the network connects:
   - `window` keydown/keyup (**bubble phase**); window `blur` → `releaseKeys`; `pointerlockchange` → `onLockChange`.
-  - Resizing: `window` `resize`, `document` `fullscreenchange` and `visualViewport` `resize` → `wantResize` (`:2783`, `:2806-2810`).
-  - New in 325afb04b5, between those: `contextlost`/`contextrestored` on `#hud`, `#inv` and `#load`, and `webglcontextlost`/`webglcontextrestored` on `#gl`, which reload the page (`:2784-2805`, game-core.md §4).
+  - Resizing: `window` `resize`, `document` `fullscreenchange` and `visualViewport` `resize` → `wantResize` (`:2787`, `:2810-2814`).
+  - New in 325afb04b5, between those: `contextlost`/`contextrestored` on `#hud`, `#inv` and `#load`, and `webglcontextlost`/`webglcontextrestored` on `#gl`, which reload the page (`:2788-2809`, game-core.md §4).
   - `#gl`: mousedown, pointerdown/move/up, wheel (non-passive), contextmenu.
   - `window`: mouseup, mousemove, pointerup. `#inv`: pointer and wheel. `#stick`, `#t-jump`, `#t-sneak`: pointer handlers.
-  - `#chatbox`: pointerdown/mousedown (caret placement), plus `compositionstart/update/end` (`:2818-2834`). During IME composition the input's own text is hidden (`opacity:0`) and the composing range is drawn on the canvas.
-  - New in c25d4c024d, `main.js:2935-2962`: window **capture** `pointerdown` and `mousedown` remember what was pressed, and a window capture `contextmenu` blocks the browser menu everywhere, except on an editable element that was itself pressed or is focused.
+  - `#chatbox`: pointerdown/mousedown (caret placement), plus `compositionstart/update/end` (`:2822-2838`). During IME composition the input's own text is hidden (`opacity:0`) and the composing range is drawn on the canvas.
+  - New in c25d4c024d, `main.js:2939-2966`: window **capture** `pointerdown` and `mousedown` remember what was pressed, and a window capture `contextmenu` blocks the browser menu everywhere, except on an editable element that was itself pressed or is focused.
   - Others: `ChatSuggest.listen` `chat-suggest.js:152` adds window **capture** pointerdown/mousedown/touchstart/wheel over popup rows. The skin editor adds window **capture** keydown/keyup that call `stopImmediatePropagation` (`skin-editor.js:463-464`). `#chat-toggle` stops key and pointer propagation. `SignsClient` ignores composing keys (`signs.js:128`).
-- **`onKeyDown` `:2633`.** The first handler that claims the key returns:
+- **`onKeyDown` `:2637`.** The first handler that claims the key returns:
   1. editors: `signs.key`, survival `labels`, `book`, `onboarding`, `end`.
   2. `S.resuming` → ignore the key.
   3. `S.chatOpen`:
-     - **while composing (`compose.on || e.isComposing || e.keyCode === 229`, `:2509`) every key is left to the IME** (`:2642`);
+     - **while composing (`compose.on || e.isComposing || e.keyCode === 229`, `:2513`) every key is left to the IME** (`:2646`);
      - otherwise `suggest.key` (Tab/Up/Down/Escape); Enter → `sendChat`; Escape → `closeChat`;
      - every other key goes natively to `#chatbox`.
   4. `survival.screens.key` (`screens.js:683`): Escape or `inventory` closes, a hotbar bind swaps, `drop` throws.
   5. creative `inv.key` (`inventory.js:226`): Escape or `inventory` closes, a hotbar bind assigns, a printable key focuses the search box.
-  6. **Blueprint mode** (new in c25d4c024d, `:2658`): while `BP.active()` (a corner pick or a ghost) with no menu or chat, a `place`-scope key (`bpTurn` R, `bpKeep` K, `bpPaste` C) or Escape goes to `BP.key`, with `preventDefault`. Since f6b38f505d `BP.key` gets the bind id, not the code. There is no DOM sign of this mode (§5, "Detecting state").
-  7. Undo preview (`:2664`): the `bpPaste` bind confirms and Escape cancels. The other two `place` keys are claimed and do nothing.
+  6. **Blueprint mode** (new in c25d4c024d, `:2662`): while `BP.active()` (a corner pick or a ghost) with no menu or chat, a `place`-scope key (`bpTurn` R, `bpKeep` K, `bpPaste` C) or Escape goes to `BP.key`, with `preventDefault`. Since f6b38f505d `BP.key` gets the bind id, not the code. Since b10d551d41 this also runs in survival: with no creative rights `bpPaste` anchors a build guide (`bpAnchor`), and its HUD line lists only `bpTurn` and `bpPaste`. An anchored guide is not this mode: `BP.active()` is false and it claims no keys. There is no DOM sign of this mode (§5, "Detecting state").
+  7. Undo preview (`:2668`): the `bpPaste` bind confirms and Escape cancels. The other two `place` keys are claimed and do nothing.
   8. **Any `S.menu`**: the `perspective` bind gets `preventDefault`; Escape → resume/back; **everything else is ignored**, so inputs inside screens are safe.
   9. Ignore when not started or when the target is `INPUT`/`TEXTAREA`. In lock mode, a keypress with user activation re-requests the lock.
-  10. `KB.prevent(e)` `:2691` (keys.js:117; new in f6b38f505d, replacing `PREVENT`) calls `preventDefault` for every bound code in any scope, and for Quote, unless Ctrl, Meta or Alt is down. That now includes letters and F11.
-  11. The `playerlist` bind sets `S.tab` (held). After that, `e.repeat` is ignored, and Escape opens pause when not locked (`:2697`).
-  12. `worldPress(c, e)` `:2703` records `S.keys[c]`, then tries, in order: `copySlow` while F3 is on, `survival.hotbars.key`, `jump`, `forward`, a hotbar slot, then the other actions. `#gl`'s mousedown in lock mode calls it too, with `KB.mouseCode(e.button)` (`:2859`), so any action can sit on a mouse button and `attack`/`use`/`pickItem` on a key. `worldRelease(c)` `:2745` is the matching release, from `onKeyUp` and `mouseup`.
+  10. `KB.prevent(e)` `:2695` (keys.js:117; new in f6b38f505d, replacing `PREVENT`) calls `preventDefault` for every bound code in any scope, and for Quote, unless Ctrl, Meta or Alt is down. That now includes letters and F11.
+  11. The `playerlist` bind sets `S.tab` (held). After that, `e.repeat` is ignored, and Escape opens pause when not locked (`:2701`).
+  12. `worldPress(c, e)` `:2707` records `S.keys[c]`, then tries, in order: `copySlow` while F3 is on, `survival.hotbars.key`, `jump`, `forward`, a hotbar slot, then the other actions. `#gl`'s mousedown in lock mode calls it too, with `KB.mouseCode(e.button)` (`:2863`), so any action can sit on a mouse button and `attack`/`use`/`pickItem` on a key. `worldRelease(c)` `:2749` is the matching release, from `onKeyUp` and `mouseup`.
 - **Game keys.** Since f6b38f505d these are the **defaults** of `BINDS` (keys.js:10), so read the real code with `codeOf(id)` (§7). Each row of `BINDS` has a `scope`: `game` is always live, `row` only with `loadout` held, `place` only in blueprint mode and undo preview, and `debug` only with F3 open. Escape, Enter in chat and the screens' own editing keys are fixed.
 
   | group | keys |
   |---|---|
   | Movement | W/A/S/D move, with the arrows as `alt` codes (`KB.held` in `tick` `:708-709`); Space jumps, double-tap within 300 ms toggles flying; Shift (L/R) sneaks; double-tap `forward` sprints. `sprint` defaults to `ControlLeft`, but `held` ignores Control codes off Mac (keys.js:106), so Ctrl only sprints on Mac, while any other key holds sprint everywhere (`:716`). An `alt` code stops counting once any bind uses it (`codes`, keys.js:99) |
-  | Hotbar | Digit1–9 select a slot, as does the wheel over `#gl`; Q drops (survival; Ctrl drops the stack); **F** swaps hands (survival, `:2729`). **Hotbar rows, survival only** (`survival/hotbars.js`, tried first in `worldPress`, `:2708`): tap **R** to cycle rows, **R + 1/2/3** to swap with a row (**1-5** with a backpack on, `rowCount`, rules/loadouts.js:2). For creative-mode players (`S.gm`) only: **C + digit** saves the hotbar, **X + digit** loads it |
+  | Hotbar | Digit1–9 select a slot, as does the wheel over `#gl`; Q drops (survival; Ctrl drops the stack); **F** swaps hands (survival, `:2733`). **Hotbar rows, survival only** (`survival/hotbars.js`, tried first in `worldPress`, `:2712`): tap **R** to cycle rows, **R + 1/2/3** to swap with a row (**1-5** with a backpack on, `rowCount`, rules/loadouts.js:2). For creative-mode players (`S.gm`) only: **C + digit** saves the hotbar, **X + digit** loads it |
   | Screens | E inventory; V verify; O owner tools (owner or op only); M new-world tab |
   | Chat, voice | P mutes or enables voice; T or Enter opens chat; `/` opens chat prefilled with `/` |
-  | View | Escape pauses (when not pointer-locked); F1 toggles `S.showHud` (+ `updateTop`); F3 debug; **L with F3 open** copies the slow-frame report (new in f6b38f505d); F5 cycles `S.view` (0 first person, 1 behind, 2 front); **F11** toggles fullscreen (new in f6b38f505d, `:2743`); Tab player list while held; C confirms an undo preview. In blueprint mode (new): C sets a corner or pastes, R turns the ghost, K toggles "keep blocks under air", Escape cancels |
-  | Mouse | LMB attack/break; RMB place/use; MMB pick block; in drag mode, click and drag to look. **New in 325afb04b5:** MMB in the creative inventory picks up a full copy of a stack (`inventory.js`), and for creative-mode players in survival containers it clones the slot (`CLICK_MODE.CLONE`, screens.js:619-622). Both follow the `pickItem` bind since f6b38f505d. **New in 575c9209bc:** Ctrl/Cmd + MMB on a chest in creative mode picks a chest item carrying a copy of its contents (tooltip line "+ Contents"); capture-phase `window` `mousedown` and `keydown` listeners in survival/creative.js:53-59 record the modifier and do not `preventDefault` |
+  | View | Escape pauses (when not pointer-locked); F1 toggles `S.showHud` (+ `updateTop`); F3 debug; **L with F3 open** copies the slow-frame report (new in f6b38f505d); F5 cycles `S.view` (0 first person, 1 behind, 2 front); **F11** toggles fullscreen (new in f6b38f505d, `:2747`); Tab player list while held; C confirms an undo preview. In blueprint mode (new): C sets a corner or pastes, R turns the ghost, K toggles "keep blocks under air", Escape cancels |
+  | Mouse | LMB attack/break; RMB place/use; MMB pick block (since b10d551d41 in survival too: it selects the block's item in the hotbar or swaps it in from the inventory, `survival/client.js:265`); in drag mode, click and drag to look. **New in 325afb04b5:** MMB in the creative inventory picks up a full copy of a stack (`inventory.js`), and for creative-mode players in survival containers it clones the slot (`CLICK_MODE.CLONE`, screens.js:619-622). Both follow the `pickItem` bind since f6b38f505d. **New in 575c9209bc:** Ctrl/Cmd + MMB on a chest in creative mode picks a chest item carrying a copy of its contents (tooltip line "+ Contents"); capture-phase `window` `mousedown` and `keydown` listeners in survival/creative.js:53-59 record the modifier and do not `preventDefault` |
   | Touch | stick moves; drag on `#gl` looks; tap breaks or places (creative); survival adds `#t-hit`, `#t-use`, `#t-drop` (`survival/touch.js:33`) |
-  | Unbound by default (`BINDS` plus a grep of the remaining `e.code`/`e.key` checks in `js/`, re-checked on f6b38f505d) | B G H I J N U Y Z, Digit0, Backquote, F2, F4, F6–F10, F12. K acts only in blueprint mode and L only with F3 open, but `KB.prevent` covers both. F, R and X do nothing in creative worlds (no survival client). Ctrl+Z/Y are used only inside the skin editor. This table is only the defaults: a user can bind any of these, so ask `bound(code)` at run time |
-- **Pointer lock and input modes.** `S.input` is one of `none|lock|drag|touch` (`setInput` `:2367`). `spawn()` `:790` picks:
+  | Unbound by default (`BINDS` plus a grep of the remaining `e.code`/`e.key` checks in `js/`, re-checked on b10d551d41) | B G H I J N U Y Z, Digit0, Backquote, F2, F4, F6–F10, F12. K acts only in blueprint mode and L only with F3 open, but `KB.prevent` covers both. F, R and X do nothing in creative worlds (no survival client). Ctrl+Z/Y are used only inside the skin editor. This table is only the defaults: a user can bind any of these, so ask `bound(code)` at run time |
+- **Pointer lock and input modes.** `S.input` is one of `none|lock|drag|touch` (`setInput` `:2371`). `spawn()` `:790` picks:
   - `touch` when `TOUCH` (`matchMedia('(pointer: coarse)')` or `?touch`, `:124`);
   - `drag` when framed (inside an 𝕏 post), in tests, or when the lock is refused;
   - `lock` otherwise.
-  - `active()` `:2360` = started, no menu or chat, not closed or resuming, and (in lock mode) actually locked. Look (`movementX*SENS`, `:2896`) and the wheel only work while `active()`.
-  - Look deltas also pass `lockJump(e)` (`:2611`). It drops the first events after locking, plus single-frame spikes (`createSpikeFilter`, look.js).
-  - When the lock is lost (Escape), `onLockChange` `:2575` opens the pause menu, unless a menu or chat is open. A running undo preview is cancelled instead, and so is blueprint mode (new in c25d4c024d, through `BP.key("Escape")`). Clicking `#gl` in lock mode re-requests the lock (`:2855`).
+  - `active()` `:2364` = started, no menu or chat, not closed or resuming, and (in lock mode) actually locked. Look (`movementX*SENS`, `:2900`) and the wheel only work while `active()`.
+  - Look deltas also pass `lockJump(e)` (`:2615`). It drops the first events after locking, plus single-frame spikes (`createSpikeFilter`, look.js).
+  - When the lock is lost (Escape), `onLockChange` `:2579` opens the pause menu, unless a menu or chat is open. A running undo preview is cancelled instead, and so is blueprint mode (new in c25d4c024d, through `BP.key("Escape")`). Clicking `#gl` in lock mode re-requests the lock (`:2859`).
 - **Detecting state without `S`:**
   - menu open = `#screen.classList.contains('on')`;
   - pause or another dialog, not the title = `on` and `dim`; the title = `on` and `title`;
@@ -368,19 +369,19 @@ New in 325afb04b5, in **sessionStorage**: `mc.glreload` (main.js:2795-2798), the
   - Style: fixed top-center, `rgba(0,0,0,.8)`, `1px #555` border (`style.css:1064`).
   - It is DOM text in the Tweetcraft webfont, not the canvas font.
 - **Canvas-only feedback** (main.js, not exported):
-  - `toast(text, ms=2500)` `:1636` sets `S.toast`, drawn above the hotbar.
-  - `flashHint(text, ms=4000)` `:1639` sets `S.flash`, drawn as the hint box.
-  - `showAdvancement` `:1678`.
-  - With `S` captured you can set `S.toast={text, until}` yourself, with `until` on the `performance.now()` clock (`main.js:1637`; `render` reads it at `:1043-1044`).
-  - In survival, `SurvivalClient.o.chat(text, color)` and `o.flashHint(text, ms)` are reachable (`main.js:1952-1953`).
-- **Chat log.** `chatLine(text, color, nameStyle, whisper)` `:1622` pushes `{text,color,nameStyle,at}` (+ `whisper, italic`) onto `S.chat` (max 60 entries) and **now returns the line object**.
+  - `toast(text, ms=2500)` `:1639` sets `S.toast`, drawn above the hotbar.
+  - `flashHint(text, ms=4000)` `:1642` sets `S.flash`, drawn as the hint box.
+  - `showAdvancement` `:1681`.
+  - With `S` captured you can set `S.toast={text, until}` yourself, with `until` on the `performance.now()` clock (`main.js:1640`; `render` reads it at `:1046-1047`).
+  - In survival, `SurvivalClient.o.chat(text, color)` and `o.flashHint(text, ms)` are reachable (`main.js:1955-1956`).
+- **Chat log.** `chatLine(text, color, nameStyle, whisper)` `:1625` pushes `{text,color,nameStyle,at}` (+ `whisper, italic`) onto `S.chat` (max 60 entries) and **now returns the line object**.
   - `visibleChat` `chat-whisper.js:22` shows up to 10 lines (20 while chat is open, only 3 whispers when hidden), fading out between 9 and 10 s.
     - With `translate` on, a line that has `tr` shows `tr.text` (translation + `[FROM]` tag) instead.
     - While chat is open it also shows a grey `#8a8a8a` "Original: …" line above it.
   - `Hud.draw` wraps lines with `wrapChat` `chat-style.js:53` and colors them with `chatRuns` `:30`. `nameStyle` is `{start,end,color}` or `{spans:[[s,e,color|"rainbow"]]}`.
-  - Incoming chat is handled at `main.js:2095-2134`. Non-blocked lines from others are offered to `translator.offer(line, m)` (`ChatTranslator`, chat-translate.js), which may set `line.tr` asynchronously. That needs Translate chat on, or the world's Translate-all flag.
+  - Incoming chat is handled at `main.js:2098-2137`. Non-blocked lines from others are offered to `translator.offer(line, m)` (`ChatTranslator`, chat-translate.js), which may set `line.tr` asynchronously. That needs Translate chat on, or the world's Translate-all flag.
   - Join/leave/achievement/system lines are localised (`T("chat.joined")`, `srvText(m)`…).
-- **Chat input.** `openChat(prefix)` `:3214` calls `releaseInput()`, then unhides and focuses `#chatbox` (`maxlength` 256 = `CHAT_MAX`). `closeChat` resets the composition state. `chatInput()` `:2510` passes the caret, the selection and the IME range `comp` to `Hud.chatField`. `sendChat` `:3238` handles:
+- **Chat input.** `openChat(prefix)` `:3218` calls `releaseInput()`, then unhides and focuses `#chatbox` (`maxlength` 256 = `CHAT_MAX`). `closeChat` resets the composition state. `chatInput()` `:2514` passes the caret, the selection and the IME range `comp` to `Hud.chatField`. `sendChat` `:3242` handles:
   - `/hide`, which toggles `S.chatHidden`.
   - whispers (`parseWhisper` `chat-whisper.js:4`).
   - pending echoes (`createPending` `chat-pending.js:42`: nonce, 10 s timeout, "not sent: reason").
@@ -414,10 +415,10 @@ New in 325afb04b5, in **sessionStorage**: `mc.glreload` (main.js:2795-2798), the
 1. **Import order.** `menus.js` caches `#screen` and `.inner` when the module is evaluated (`M:19`). Importing it before the DOM exists binds `null` and breaks every menu. Always wait for DOMContentLoaded first.
 2. **Screens are rebuilt constantly.** Any `refresh()` replaces all of `.inner`, and DOM you injected into a game screen disappears; handlers are recreated. Refreshes come from:
    - resizes that change `u`;
-   - locale changes (`main.js:1617`);
-   - network events: `M.refresh("pause","players","owner","verify","achievements","options")` at `main.js:1247,1651,2008,2146,2153,2159,2168,2339,2351`;
+   - locale changes (`main.js:1620`);
+   - network events: `M.refresh("pause","players","owner","verify","achievements","options")` at `main.js:1250,1654,2011,2149,2156,2162,2171,2343,2355`;
    - the music manifest finishing loading (`:325`, about 3 s after boot);
-   - render-distance and fullscreen changes (`:3274,3283`);
+   - render-distance and fullscreen changes (`:3278,3287`);
    - every toggle press.
 3. **Labels are bitmaps drawn at `fpx()` from `UI.u`, not from CSS `--u`.** Overriding `--u` resizes the boxes but leaves the labels at the old pixel size. A `.mcb` has no `textContent`; read its `aria-label` (localised). A label canvas can also repaint itself after creation when a glyph page loads (`whenReady`).
 4. **`--u`/`--d`/`--hp`/`--hb` are rewritten inline on every resize** (`main.js:535-538`). Since c111547912 that happens at the start of the next animation frame after the `resize`/`fullscreenchange`/`visualViewport` event, not inside the event, so a `setTimeout(…, 0)` re-apply can run *before* the game's rewrite. Overrides have to be re-applied (Better Options polls every 250 ms). A stylesheet `:root{--u:…!important}` beats the inline value (an `!important` author rule outranks a normal inline declaration).

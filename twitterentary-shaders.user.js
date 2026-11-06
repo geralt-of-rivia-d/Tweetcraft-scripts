@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitterentary shaders
 // @namespace    tweetcraft.twitterentary
-// @version      1.5.2
+// @version      1.5.3
 // @author       andrestube123
 // @description  Adds shader-style lighting, sun shadows, waving plants, reflective water, and a dynamic sky to TweetCraft, with Quality and Look presets.
 // @match        https://tweetcraft.jai.vin/*
@@ -159,7 +159,7 @@
 
     // The on/off key. Saved the way persist() saves a setting (only when it isn't the default), but kept out of
     // CFG: it is a key code, not a shader setting, and CFG's shape is what Better Options and the bench read.
-    const TOGGLE_DEFAULT = 'KeyK', TOGGLE_STORE = SKEY('toggleKey');
+    const TOGGLE_DEFAULT = 'F2', TOGGLE_STORE = SKEY('toggleKey');
     let toggleKey = TOGGLE_DEFAULT;
     try { toggleKey = localStorage.getItem(TOGGLE_STORE) || TOGGLE_DEFAULT; } catch (e) {}
     function setToggleKey(code) {
@@ -1625,7 +1625,7 @@ void main() {
     // gpuRingFrame: the frame number each sample belongs to; frame: the number of the game frame most recently
     // started (counted at its viewport call; not the same counter as state.frame)
     // scale: always 1 since 1.5.1 (tools/bench.mjs and older Better Options read it); fpsGame: frames in the last window,
-    // counted as the game's F3 overlay counts them (see gameFps), 0 until the first window closes
+    // counted as the game's F3 screen counts them (see gameFps), 0 until the first window closes (Better Options up to 1.4.0 reads it)
     const PERF = {
         fps: 0, fpsGame: 0, ms: 0, cpuMs: 0, gpuMs: null, scale: 1, cpuBound: false, shadowRefreshPerMin: 0, timer: false,
         gpuRing: new Float32Array(256), gpuRingFrame: new Int32Array(256), gpuFrame: 0, frame: 0
@@ -2048,6 +2048,7 @@ void main() {
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
         // The game's Controls screen takes the next key press, and nothing on the page says it is waiting for one.
         if (document.querySelector('#screen.on .keylist')) return;
+        e.preventDefault(); // the game ignores the default F2, so nothing else stops the browser acting on it
         set('enabled', !CFG.enabled);
         console.info(TAG, 'Shaders ' + (CFG.enabled ? 'ON' : 'OFF'));
         notify('Twitterentary shaders: ' + (CFG.enabled ? 'ON' : 'OFF'));

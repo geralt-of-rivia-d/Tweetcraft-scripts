@@ -60,7 +60,7 @@ const RTT_CALLS = ['bindFramebuffer', 'createFramebuffer', 'bindRenderbuffer', '
 const SHADOW_STATE_SAFE = file => new RegExp('^' +
   R`(?![\s\S]*\.(?:${[...RTT_CALLS, ...(file === 'js/gfx.js' ? [] : ['viewport'])].join('|')})\()` +
   R`(?![\s\S]*\bSCISSOR_TEST\b)`);
-// The performance overlay key (Better Options' tc.perfOverlay keybind): no "F2" string, .F2 property or keyCode 113.
+// The shader toggle's default key (tc.shaders.toggle): no "F2" string, .F2 property or keyCode 113.
 const NOT_F2 = /^(?![\s\S]*["'`]F2["'`])(?![\s\S]*\.F2\b)(?![\s\S]*\b(?:keyCode|which)\s*===?\s*113\b)/;
 // Zoom's default key Z, by code, key or key code. js/skin-editor.js is the one exception, with its own entry.
 const NOT_Z = /^(?![\s\S]*["'`]KeyZ["'`])(?![\s\S]*\.KeyZ\b)(?![\s\S]*\.key\s*===?\s*["'`][zZ]["'`])(?![\s\S]*\b(?:keyCode|which)\s*===?\s*90\b)/;
@@ -187,10 +187,6 @@ export const source = [
   { script: SHADERS, file: 'js/dragonview.js', test: /\bfunction dragonView\(\s*(\w+)[^)]*\)\s*\{\s*const\s+\w+\s*=\s*\1\.getContext\(\s*["']webgl2["']/, why: 'the dragon view renders on its own canvas and WebGL2 context, so its colour clear is not counted as a frame (only the context that first uses a patched program is)' },
   { script: SHADERS, file: 'js/main.js', test: /loadTiles\(\s*\w+\.texNames\s*\)[\s\S]{0,200}?\.texNames\.indexOf\(\s*["']oak_planks["']\s*\)[\s\S]{0,200}?\.setTiles\(/, why: 'the list searched for "oak_planks" is texNames, the same list that orders the atlas layers passed to setTiles' },
   { script: SHADERS, file: 'engine.wasm', test: /^(?=[\s\S]*oak_leaves)(?=[\s\S]*water_still)(?=[\s\S]*short_grass)(?=[\s\S]*glowstone)/, why: 'layers are classified by texture name (*leaves*, water*, the plant list, the emissive list)' },
-  // K (the shader toggle, rebindable since 1.5.2). Main.js has no key codes of its own any more, so the facts are one bind in
-  // keys.js and the gate in main.js. The toggle's own guard against the game's Controls screen is the controls.js entry below.
-  { script: SHADERS, file: 'js/keys.js', test: new RegExp(R`^(?![\s\S]*["'\x60]KeyK["'\x60][\s\S]*["'\x60]KeyK["'\x60])[\s\S]*${BIND('bpKeep', 'KeyK')}[^{}]*?\bscope\s*:\s*["']place["']`), why: 'K is a game key in one place only: bpKeep, the one bind on KeyK, in scope "place". Any wider use of K must be caught and judged again. Deliberately red on staging until this file arrives there.' },
-  { script: SHADERS, file: 'js/main.js', test: new RegExp(R`^(?![\s\S]*["'\x60]KeyK["'\x60])(?![\s\S]*\.KeyK\b)(?![\s\S]*\b(?:keyCode|which)\s*===?\s*75\b)(?:(?=[\s\S]*\b(?<place>\w+)\s*=\s*(?<ev>\w+)\.code\s*===\s*["']Escape["']\s*\?\s*["']Escape["']\s*:\s*\w+\.action\(\s*\k<ev>\.code\s*,\s*["']place["']\s*\)\s*;\s*if\s*\(\s*\w+\.active\(\)\s*&&\s*!\w+\.menu\s*&&\s*!\w+\.chatOpen\s*&&\s*\k<place>\s*\)\s*\{[^{}]*?\.key\(\s*\k<place>\s*\))|(?![\s\S]*\bblueprint-ui\.js\b))`), why: 'scope "place" binds act only with a blueprint ghost held and no menu or chat: BP.active() && !S.menu && !S.chatOpen && place, then BP.key(place). That is when K also flips the ghost\'s "keep", an overlap the user accepted: both fire. (In an undo preview the game also swallows place keys, but only bpPaste and Escape do anything there.) A build with no blueprints (staging) has nothing to gate, and main.js itself reads K in no form on any build' },
   // --- Twitterentary shaders: how a frame is drawn. The viewport hook detects the frame and starts its timing on the
   // frame's one viewport call, and the shadow pass restores what it found. These are the game facts that relies on.
   { script: SHADERS, file: 'js/gfx.js', test: /^(?![\s\S]*\.viewport\([\s\S]*\.viewport\()[\s\S]*(?<!\basync\s+)\bdraw\(\s*(\w+)\s*\)\s*\{(?:(?!\.\w+\()[^{}]){0,200}?\.viewport\(\s*0\s*,\s*0\s*,\s*\1\.w\s*,\s*\1\.h\s*\)/, why: 'Gfx.draw(v) (not async) calls viewport(0, 0, v.w, v.h) before any other method call, and it is gfx.js\'s only viewport: the viewport hook detects the frame on that call and remembers it as the viewport the shadow pass restores' },
@@ -204,8 +200,12 @@ export const source = [
   { script: SHADERS, file: 'js/main.js', test: /\bcreateFrameLoop\(\s*\w+\s*\)/, why: 'main.js creates its frame loop with the default raf (the global requestAnimationFrame), so our wrapper times the game\'s callback' },
   // perf.fpsGame copies the game's F3 counter. S isn't exported and F3 is drawn on the HUD canvas, so a change to the
   // game's window can only be caught here.
-  { script: SHADERS, file: 'js/main.js', test: /\bfunction\s+frame(?:Body)?\(\s*(\w+)\s*\)\s*\{(?:(?!\bfunction\s+\w+\s*\()[\s\S])*?\b(\w+)\+\+\s*;\s*if\s*\(\s*\1\s*-\s*(\w+)\s*>\s*1e3\s*\)\s*\{\s*\w+\.fps\s*=\s*\2\s*;\s*\2\s*=\s*0\s*;\s*\3\s*=\s*\1\b/, why: 'the game\'s FPS is a frame count, not a mean: frames++, and when now - fpsT > 1e3 (on the rAF timestamp) S.fps = frames; frames = 0; fpsT = now. perf.fpsGame repeats exactly this, so F2 and F3 agree: if the game changes its window, change perfFrame()' },
-  { script: SHADERS, file: 'js/main.js', test: /\$\{\s*\w+\.fps\s*\}\s*fps,\s*\$\{\s*\w+\.chunks\.size\s*\}\s*chunks/, why: 'F3\'s first line is `${S.fps} fps, ${gfx.chunks.size} chunks`: the number the F2 overlay has to match is that S.fps, shown unrounded' },
+  { script: SHADERS, file: 'js/main.js', test: /\bfunction\s+frame(?:Body)?\(\s*(\w+)\s*\)\s*\{(?:(?!\bfunction\s+\w+\s*\()[\s\S])*?\b(\w+)\+\+\s*;\s*if\s*\(\s*\1\s*-\s*(\w+)\s*>\s*1e3\s*\)\s*\{\s*\w+\.fps\s*=\s*\2\s*;\s*\2\s*=\s*0\s*;\s*\3\s*=\s*\1\b/, why: 'the game\'s FPS is a frame count, not a mean: frames++, and when now - fpsT > 1e3 (on the rAF timestamp) S.fps = frames; frames = 0; fpsT = now. perf.fpsGame repeats exactly this, so the published number agrees with F3: if the game changes its window, change perfFrame()' },
+  { script: SHADERS, file: 'js/main.js', test: /\$\{\s*\w+\.fps\s*\}\s*fps,\s*\$\{\s*\w+\.chunks\.size\s*\}\s*chunks/, why: 'F3\'s first line is `${S.fps} fps, ${gfx.chunks.size} chunks`: the number perf.fpsGame has to match is that S.fps, shown unrounded. It is also why the two F3 lines Better Options adds leave FPS out: this line already shows it' },
+  // Better Options 1.5 adds two lines to F3 through its Hud.prototype.draw wrapper, which sees only the array main.js passes as o.debug.
+  { script: OPTIONS, file: 'js/main.js', test: new RegExp(R`\bhud\.draw\(\{(?:(?!\bhud\.draw\()[\s\S]){0,3000}?\bdebug\s*:\s*\w+\.debug\s*\?\s*(\w+)\(\)\s*:\s*null\b(?=[\s\S]*\bfunction\s+\1\(\)\s*\{(?:(?!\bfunction\s+\w+\s*\()[\s\S])*?\breturn\s*\[(?:(?!\bfunction\s+\w+\s*\()[\s\S])*?\]\.filter\(\s*Boolean\s*\)\s*;?\s*\})`), why: 'main.js hands F3 to the HUD as hud.draw({ debug: S.debug ? debugLines() : null }), and debugLines() returns a fresh array, [...].filter(Boolean): our wrapper adds its two lines to that array, and with F3 off o.debug is null and it adds nothing' },
+  { script: OPTIONS, file: 'js/main.js', test: new RegExp(R`^(?:(?![\s\S]*${KEYS_IMPORT})(?![\s\S]*\x60Frame:)|[\s\S]*?\bfunction\s+debugLines\(\)\s*\{(?:(?!\bfunction\s+\w+\s*\()[\s\S])*?\breturn\s*\[(?:(?!\bfunction\s+\w+\s*\()[\s\S])*?[,\[]\s*\x60Frame: )`), why: 'debugLines() has an entry that starts "Frame: ": the wrapper puts "Shaders:" and "Shadows:" straight after the first line that starts so. A build with no js/keys.js and no "Frame:" text (staging) has no such line, and there they go at the end, which is the case the runtime check also covers' },
+  { script: OPTIONS, file: 'js/ui.js', test: /\bclass\s+Hud\b[\s\S]*?\bdraw\(\s*(\w+)\s*\)\s*\{[\s\S]*?\bif\s*\(\s*\1\.debug\s*\)\s*\{[^{}]*?\bfor\s*\(\s*const\s+(\w+)\s+of\s+\1\.debug\s*\)\s*\{[^{}]*?\.draw\([^;{}]*\b\2\b/, why: 'Hud.draw(o) walks o.debug and paints every entry in turn, one row each, with no fixed count: two more strings in the array are two more rows on F3' },
   // The atlas outgrowing one array texture (js/texpages.js). Staging lacks this file until it gets build 6b3963e444, so
   // these two entries stay red there until then: a deliberate decision, rather than an optional-file flag in tools/.
   { script: SHADERS, file: 'js/texpages.js', test: /^(?=[\s\S]*\bPAGE_UNIT\s*=\s*8\b)(?=[\s\S]*=\s*PAGE_UNIT\s*\+\s*\w+\s*-\s*1\b)/, why: 'the game\'s extra atlas pages start at texture unit PAGE_UNIT = 8 (page k on PAGE_UNIT + k - 1): our units 6 and 7 stay free, and anything we add must stay below 8. (Staging lacks this file until it gets build 6b3963e444, so this is red there.)' },
@@ -259,7 +259,7 @@ export const source = [
   { script: OPTIONS, file: 'js/menus.js', test: /\bbtn\(\s*\w+\(\s*["']pause\.distance["']\s*,\s*\{\s*n\s*:\s*\w+\.rd\s*\}\s*\)\s*,\s*\w+\.cycleRd\b/, why: 'the Distance button is labelled t("pause.distance", {n: S.rd}) and a click cycles it (G.cycleRd): setRenderDistance() finds it by that label and clicks until it shows the target' },
   { script: OPTIONS, file: 'js/view.js', test: /\bRDS\s*=\s*Object\.freeze\(\s*\[\s*4\s*,\s*6\s*,\s*8\s*,\s*10\s*,\s*12\s*\]\s*\)/, why: 'our render-distance slider offers the game\'s distances 4-12 (step 2)' },
   // Better Options: key remapping is off while the inventory (or a survival screen) is open
-  { script: OPTIONS, file: 'index.html', test: 'id="inv"', why: 'invClosed() looks for #inv (key remapping and, in 1.2, the F2 overlay key are ignored while it is open, and a finished or stopped benchmark does not reopen our menu over it)' },
+  { script: OPTIONS, file: 'index.html', test: 'id="inv"', why: 'invClosed() looks for #inv (key remapping is ignored while it is open, and a finished or stopped benchmark does not reopen our menu over it)' },
   { script: OPTIONS, file: 'js/inventory.js', test: /^(?=[\s\S]*\bshow\(\)\s*\{[^}]*?\.classList\.remove\(\s*["']off["']\s*\))(?=[\s\S]*\bhide\(\)\s*\{[^}]*?\.classList\.add\(\s*["']off["']\s*\))/, why: 'the inventory drops class "off" from #inv when shown and adds it back when hidden' },
   { script: OPTIONS, file: 'js/survival/screens.js', test: /^(?=[\s\S]*this\.c\.classList\.remove\(\s*["']off["']\s*\))(?=[\s\S]*this\.c\.classList\.add\(\s*["']off["']\s*\))/, why: 'survival screens (chests, crafting...) toggle "off" on the same canvas' },
   { script: OPTIONS, file: 'js/main.js', test: /screens\s*:\s*\{\s*canvas\s*:\s*(\w+)[\s\S]*?\b\1\s*=\s*[\w$.]+\(\s*["']#inv["']\s*\)|\b(\w+)\s*=\s*[\w$.]+\(\s*["']#inv["']\s*\)[\s\S]*?screens\s*:\s*\{\s*canvas\s*:\s*\2\b/, why: 'that canvas is #inv' },
@@ -289,11 +289,11 @@ export const source = [
   { script: OPTIONS, file: 'js/main.js', test: new RegExp(R`^(?:(?=[\s\S]*delete\s+\w+\.keys\[\s*\w+\.code\s*\])(?=[\s\S]*\.keys\[\s*\w+\s*\]\s*=\s*true)|(?=[\s\S]*${KEYS_IMPORT})(?=[\s\S]*\bfunction\s+onKeyUp\(\s*(?<up>\w+)\s*\)\s*\{\s*(?<rel>\w+)\(\s*\k<up>\.code\s*\)\s*;?\s*\})(?=[\s\S]*\bfunction\s+\k<rel>\(\s*(?<c>\w+)\s*\)\s*\{\s*delete\s+\w+\.keys\[\s*\k<c>\s*\])(?=[\s\S]*\bconst\s+(?<dn>\w+)\s*=\s*\w+\.code\s*;[\s\S]*?\b(?<press>\w+)\(\s*\k<dn>\s*,\s*\w+\s*\)\s*;?\s*\}\s*function\s+\k<press>\(\s*(?<p>\w+)\s*,\s*\w+\s*\)\s*\{(?:(?!\bfunction\s+\w+\s*\()[\s\S])*?\.keys\[\s*\k<p>\s*\]\s*=\s*true))`), why: 'held keys are tracked by e.code: what our remap rewrites on a build without js/keys.js. With that file our remap is retired, but sendF1\'s synthetic keydown still reaches the game the same way: onKeyDown passes e.code to worldPress, which sets S.keys[c], and onKeyUp hands e.code to worldRelease, which deletes it' },
   { script: OPTIONS, file: 'js/main.js', test: new RegExp(R`^(?:(?=[\s\S]*${KEYS_IMPORT})|(?=[\s\S]*\.KeyW\b)(?=[\s\S]*\.KeyS\b)(?=[\s\S]*\.KeyA\b)(?=[\s\S]*\.KeyD\b)(?=[\s\S]*["']Space["'])(?=[\s\S]*\.ShiftLeft\b)(?=[\s\S]*\.ControlLeft\b)(?=[\s\S]*["']KeyQ["'])(?=[\s\S]*["']KeyE["'])(?=[\s\S]*["']KeyT["'])(?=[\s\S]*["']F5["'])(?=[\s\S]*["']F3["'])(?=[\s\S]*["']F1["']))`), why: 'on a build without js/keys.js the Keybinds tab lists these game codes (GAME_ACTIONS): W A S D, Space, ShiftLeft, ControlLeft, Q, E, T, F5, F3, F1. With that file the game rebinds them itself, the rows are gone, and the keys.js entries below hold what the game uses' },
   { script: OPTIONS, file: 'js/main.js', test: /===\s*["'](?:F1|hideHud)["']\s*\)\s*\{?\s*\w+\.showHud\s*=\s*!\s*\w+\.showHud/, why: 'a keydown of the HUD key toggles S.showHud: by e.code === "F1", or from f6b38f505d by the action a === "hideHud". The HUD toggle sends one' },
-  // The performance overlay keybind (tc.perfOverlay) defaults to F2, so no game module may handle F2
-  ...KEY_MODULES.map(file => ({ script: OPTIONS, file, test: NOT_F2, why: 'F2 (default key of the performance overlay, tc.perfOverlay) is not a game key here: no "F2" code or key, .F2 or keyCode 113.' + STAGING_RED(file) })),
-  { script: OPTIONS, file: 'js/keys.js', test: NOT_DEFAULT_BIND('F2'), why: 'F2 is no bind\'s default or alternative, so a fresh profile leaves it to the overlay. A player can still bind it on the game\'s Controls screen: then both act. Deliberately red on staging until this file arrives there.' },
-  { script: OPTIONS, file: 'js/keys.js', test: /\bprevent\s*=\s*(\w+)\s*=>\s*!\(\s*\1\.ctrlKey\s*\|\|\s*\1\.metaKey\s*\|\|\s*\1\.altKey\s*\)\s*&&\s*\(\s*\1\.code\s*===\s*["']Quote["']\s*\|\|\s*bound\(\s*\1\.code\s*\)\s*\)/, why: 'the game preventDefaults only a bound key (or Quote) with no Ctrl, Cmd or Alt held. F2 is no default bind, so it isn\'t prevented unless a player binds it: our F2 handler calls preventDefault itself. Deliberately red on staging until this file arrives there.' },
-  { script: OPTIONS, file: 'js/main.js', test: /\bPREVENT\s*=\s*new\s+Set\(\s*\[(?![^\]]*["']F2["'])[^\]]*["']F1["'][^\]]*["']F3["'][^\]]*\]\s*\)|\bif\s*\(\s*\w+\.prevent\(\s*(\w+)\s*\)\s*\)\s*\1\.preventDefault\(\)/, why: 'the game\'s only blanket preventDefault in play is its PREVENT set (F1/F3/F5, no F2), or from f6b38f505d KB.prevent(e): our F2 handler calls preventDefault itself' },
+  // The shader toggle (tc.shaders.toggle) defaults to F2, so no game module may handle F2
+  ...KEY_MODULES.map(file => ({ script: SHADERS, file, test: NOT_F2, why: 'F2 (default key of the shader toggle, tc.shaders.toggle) is not a game key here: no "F2" code or key, .F2 or keyCode 113.' + STAGING_RED(file) })),
+  { script: SHADERS, file: 'js/keys.js', test: NOT_DEFAULT_BIND('F2'), why: 'F2 is no bind\'s default or alternative, so a fresh profile leaves it to the shader toggle. A player can still bind it on the game\'s Controls screen: then both act. Deliberately red on staging until this file arrives there.' },
+  { script: SHADERS, file: 'js/keys.js', test: /\bprevent\s*=\s*(\w+)\s*=>\s*!\(\s*\1\.ctrlKey\s*\|\|\s*\1\.metaKey\s*\|\|\s*\1\.altKey\s*\)\s*&&\s*\(\s*\1\.code\s*===\s*["']Quote["']\s*\|\|\s*bound\(\s*\1\.code\s*\)\s*\)/, why: 'the game preventDefaults only a bound key (or Quote) with no Ctrl, Cmd or Alt held. F2 is no default bind, so the game doesn\'t prevent it unless a player binds it: our toggle handler calls preventDefault itself on a press that toggles. Deliberately red on staging until this file arrives there.' },
+  { script: SHADERS, file: 'js/main.js', test: /\bPREVENT\s*=\s*new\s+Set\(\s*\[(?![^\]]*["']F2["'])[^\]]*["']F1["'][^\]]*["']F3["'][^\]]*\]\s*\)|\bif\s*\(\s*\w+\.prevent\(\s*(\w+)\s*\)\s*\)\s*\1\.preventDefault\(\)/, why: 'the game\'s only blanket preventDefault in play is its PREVENT set (F1/F3/F5, no F2), or from f6b38f505d KB.prevent(e). F2 is the shader toggle\'s default, and its handler calls preventDefault itself' },
   // Zoom holds Z by default (it moved off C in 1.1.2), so no game module may handle Z but the skin editor's Ctrl+Z
   ...KEY_MODULES.filter(file => file !== 'js/skin-editor.js').map(file => ({ script: ZOOM, file, test: NOT_Z, why: 'Z (default key of Zoom) is not a game key here: no "KeyZ" code, .KeyZ, "z" key or keyCode 90.' + STAGING_RED(file) })),
   { script: ZOOM, file: 'js/keys.js', test: NOT_DEFAULT_BIND('KeyZ'), why: 'Z is no bind\'s default or alternative, so a fresh profile leaves it to Zoom. A player can still bind it on the game\'s Controls screen: then both act. Deliberately red on staging until this file arrives there.' },
@@ -305,8 +305,8 @@ export const source = [
   { script: OPTIONS, file: 'js/main.js', test: new RegExp(NO_NEW_GAME_KEY + R`(?:(?=[\s\S]*${KEYS_IMPORT})${NO_RAW_KEYS}|(?![\s\S]*${KEYS_IMPORT})(?=[\s\S]*["']KeyC["'])(?=[\s\S]*["']KeyM["'])(?=[\s\S]*["']KeyO["'])(?=[\s\S]*["']KeyP["'])(?=[\s\S]*["']KeyV["'])(?=[\s\S]*["']Enter["'])(?=[\s\S]*["']Slash["'])(?=[\s\S]*["']Tab["'])(?=[\s\S]*["']ArrowUp["'])(?=[\s\S]*["']ArrowDown["'])(?=[\s\S]*["']ArrowLeft["'])(?=[\s\S]*["']ArrowRight["'])(?=[\s\S]*\.ShiftRight\b)(?=[\s\S]*\.startsWith\(\s*["']Digit["']\s*\)\s*&&\s*\w+\s*!==\s*["']Digit0["'])(?:(?=[\s\S]*["']KeyF["'])(?=[\s\S]*["']KeyK["'])(?=[\s\S]*["']KeyR["'])|(?![\s\S]*["']Key[FKR]["'])))`), why: 'with js/keys.js, main.js holds no key code or poll of its own, so everything it handles is in BINDS. Without it (staging), GAME_ONLY_KEYS lists what onKeyDown handles beyond the GAME_ACTIONS rows: C, M, O, P, V, Enter, Slash, Tab, the four arrows, ShiftRight and Digit1-9, plus F, K and R (all three or none). There, a code outside those fails here if it is a quoted string or a .Key, .Control, .Alt or .Meta poll; a code main.js builds at runtime would not be seen' },
   // Staging has neither of the next two files yet: as with js/texpages.js, these entries stay red there until it gets
   // them, a deliberate decision rather than an optional-file flag in tools/.
-  { script: [OPTIONS, ZOOM], file: 'js/survival/hotbars.js', test: new RegExp('^' + NO_RAW_KEYS + R`(?=[\s\S]*\.is\(\s*\w+\s*,\s*["']loadout["']\s*\))(?=[\s\S]*\.held\(\s*["']saveToolbar["'])(?=[\s\S]*\.held\(\s*["']loadToolbar["'])`), why: 'survival/hotbars.js reads the loadout key, and saveToolbar and loadToolbar held with a digit, by bind id. It holds no key code of its own, so neither Zoom\'s Z nor the overlay\'s F2. Deliberately red on staging until this file arrives there.' },
-  { script: [OPTIONS, ZOOM], file: 'js/blueprint-ui.js', test: new RegExp('^' + NO_RAW_KEYS + R`(?=[\s\S]*\bexport\s+function\s+key\(\s*(?<a>\w+)\s*\)\s*\{(?=[\s\S]*\k<a>\s*===\s*["']bpTurn["'])(?=[\s\S]*\k<a>\s*===\s*["']bpKeep["'])(?=[\s\S]*\k<a>\s*===\s*["']bpPaste["']))`), why: 'blueprint-ui.js key() takes the place actions bpTurn, bpKeep and bpPaste (and Escape) from main.js. It holds no key code of its own, so neither Zoom\'s Z nor the overlay\'s F2. Deliberately red on staging until this file arrives there.' },
+  { script: [OPTIONS, ZOOM], file: 'js/survival/hotbars.js', test: new RegExp('^' + NO_RAW_KEYS + R`(?=[\s\S]*\.is\(\s*\w+\s*,\s*["']loadout["']\s*\))(?=[\s\S]*\.held\(\s*["']saveToolbar["'])(?=[\s\S]*\.held\(\s*["']loadToolbar["'])`), why: 'survival/hotbars.js reads the loadout key, and saveToolbar and loadToolbar held with a digit, by bind id. It holds no key code of its own, so neither Zoom\'s Z nor the shader toggle\'s F2. Deliberately red on staging until this file arrives there.' },
+  { script: [OPTIONS, ZOOM], file: 'js/blueprint-ui.js', test: new RegExp('^' + NO_RAW_KEYS + R`(?=[\s\S]*\bexport\s+function\s+key\(\s*(?<a>\w+)\s*\)\s*\{(?=[\s\S]*\k<a>\s*===\s*["']bpTurn["'])(?=[\s\S]*\k<a>\s*===\s*["']bpKeep["'])(?=[\s\S]*\k<a>\s*===\s*["']bpPaste["']))`), why: 'blueprint-ui.js key() takes the place actions bpTurn, bpKeep and bpPaste (and Escape) from main.js. It holds no key code of its own, so neither Zoom\'s Z nor the shader toggle\'s F2. Deliberately red on staging until this file arrives there.' },
   // Why Zoom left C. These record a reason, not a dependency, so they use `known`: each asserts the old state ("C is free
   // here"), which is false today. That reports as known and never fails, here or on a build without the file. If the
   // game ever frees C the check says "now passes", which is the moment to reconsider.
@@ -323,7 +323,7 @@ export const source = [
   ...['js/main.js', 'js/controls.js'].map(file => ({ script: OPTIONS, file, test: new RegExp(KEYS_IMPORT + R`|^(?![\s\S]*\bkeys\.js\b)`), why: 'the game imports "./keys.js" with no query string, so import("/js/keys.js") is the instance it uses. A build with no such module has nothing to share.' + STAGING_RED(file) })),
   { script: OPTIONS, file: 'index.html', test: /^(?![\s\S]*<base\b)[\s\S]*<script\b[^>]*\bsrc=["']\/js\/main\.js(?:\?[^"']*)?["']/, why: 'main.js loads from /js/ with no <base>, so its "./keys.js" resolves to /js/keys.js, the path Better Options imports. A query on main.js itself would not carry over to that import' },
   { script: [OPTIONS, SHADERS, ZOOM], file: 'js/controls.js', exports: ['openControls'], why: 'the game\'s own rebinding screen: Better Options\' Keybinds tab sends the player there for game keys. Deliberately red on staging until this file arrives there.' },
-  { script: [OPTIONS, SHADERS], file: 'js/controls.js', test: /\bclass\s*:\s*["']keylist["']/, why: 'the Controls screen\'s list is div.keylist: "#screen.on .keylist" is how the shader toggle and the overlay key know to stand aside. Deliberately red on staging until this file arrives there.' },
+  { script: SHADERS, file: 'js/controls.js', test: /\bclass\s*:\s*["']keylist["']/, why: 'the Controls screen\'s list is div.keylist: "#screen.on .keylist" is how the shader toggle knows to stand aside. Deliberately red on staging until this file arrives there.' },
   { script: [OPTIONS, SHADERS, ZOOM], file: 'js/controls.js', test: new RegExp(R`\bfunction\s+(?<take>\w+)\(\s*(?<e>\w+)\s*,\s*\w+\s*\)\s*\{\s*\k<e>\.preventDefault\(\)\s*;\s*\k<e>\.stopImmediatePropagation\(\)[\s\S]*?\baddEventListener\(\s*["']keydown["']\s*,\s*\w+\s*=>\s*\{[^{}]*?\k<take>\(\s*\w+\s*,\s*\w+\.code\s*\)[^{}]*?\}\s*,\s*true\s*\)`), why: 'a new key is recorded by a capture-phase window keydown that stops every later listener, but ours run first: a mod key pressed to record a bind would still fire its action unless it stands aside on this screen. Deliberately red on staging until this file arrives there.' },
   { script: ZOOM, file: 'js/controls.js', test: /\.showScreen\(\s*["']controls["']\s*,[\s\S]*["']dim["']\s*\)/, why: 'the Controls screen goes through showScreen(), so #screen is on and canZoom() refuses there: Zoom needs no .keylist test of its own. Deliberately red on staging until this file arrives there.' },
   { script: OPTIONS, file: 'js/menus.js', test: new RegExp(R`\.menuName\s*===\s*["']controls["']\s*\)\s*openOptions\(\)|^(?![\s\S]*${CONTROLS_IMPORT})`), why: 'back() from "controls" goes to the game\'s Options, not our menu: Done or Escape there does not return to the Keybinds tab. A build without js/controls.js has no such screen' },
@@ -336,18 +336,13 @@ export const source = [
   { script: OPTIONS, file: 'index.html', test: 'id="hudtop"', why: 'the in-world HUD bar is #hudtop' },
   { script: OPTIONS, file: 'js/main.js', test: /^(?=[\s\S]*\b(\w+)\s*=\s*[\w$.]+\(\s*["']#hudtop["']\s*\))(?=[\s\S]*\bfunction updateTop\(\)\s*\{\s*const\s+(\w+)\s*=[^;]*\w+\.started\b[^;]*!\w+\.menu\b[^;]*;\s*\1\.hidden\s*=\s*!\(\s*\2\s*&&\s*\w+\.showHud\s*\))/, why: 'updateTop() sets #hudtop.hidden = !(in a world with no menu open && S.showHud): with no menu open, a hidden #hudtop means the HUD is off' },
   { script: OPTIONS, file: 'js/menus.js', test: /\bfunction closeMenu\(\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,400}?\.menu\s*=\s*null(?:(?!\bfunction\b)[\s\S]){0,300}?\b\w+\.updateTop\(\)/, why: 'closeMenu() clears S.menu and then runs updateTop(), so #hudtop.hidden is current right after it' },
-  // Better Options 1.2: the performance overlay (#tc-perf) sits below the game's top-right HUD buttons (#hudright)
-  { script: OPTIONS, file: 'index.html', test: /<div\b(?=[^>]*\bid=["']hudtop["'])(?=[^>]*\shidden[\s=>])[^>]*>\s*(?:<div\b[^>]*>\s*<\/div>\s*)*<div\b(?=[^>]*\bid=["']hudright["'])[^>]*>/, why: 'the top-right HUD buttons are #hudright, a child of #hudtop (hidden at load): placePerf() puts #tc-perf below #hudright while #hudtop is shown, else in the corner' },
-  { script: OPTIONS, file: 'js/main.js', test: /[\w$.]+\(\s*["']#hudright["']\s*\)\.replaceChildren\(/, why: 'buildTop() rebuilds #hudright with replaceChildren (new buttons on a --hp or language change): placePerf() re-measures when #hudright\'s first child or child count, #hudtop.hidden or the inline --hp / --tc-s change, and after a resize or when the overlay is turned on' },
-  { script: OPTIONS, file: 'style.css', test: /^(?=[\s\S]*#hudtop\s*\{[^}]*\bposition:\s*fixed\b)(?=[\s\S]*#hudright\s*\{(?=[^}]*\bposition:\s*absolute\b)(?=[^}]*\btop:\s*max\(\s*calc\(\s*4\s*\*\s*var\(--hp\)\s*\))(?=[^}]*\bflex-direction:\s*column\b)(?=[^}]*\bgap:\s*calc\(\s*2\s*\*\s*var\(--hp\)\s*\)))(?=[\s\S]*#hudright\s*\{[^}]*\bright:\s*max\(\s*calc\(\s*4\s*\*\s*var\(--hp\)\s*\))(?=[\s\S]*\.mcb\.hb\s*\{[^}]*\bheight:\s*calc\(\s*18\s*\*\s*var\(--hp\)\s*\))/, why: '#hudright is a column at top/right max(4 * --hp, safe area) inside the fixed #hudtop, gap 2 * --hp, of .mcb.hb buttons 18 * --hp tall: its box depends only on its buttons, --hp and the window, which is what placePerf() watches, and #tc-perf (position: fixed) uses the same 4 * --hp corner offsets' },
-  { script: OPTIONS, file: 'js/main.js', test: /^(?![\s\S]*["'`]--hp["'`][\s\S]*["'`]--hp["'`])[\s\S]*?\b(\w+)\s*=\s*document\.documentElement\.style\s*;(?:(?!\bfunction\b)[\s\S]){0,400}?\b\1\.setProperty\(\s*["']--hp["']\s*,/, why: 'resize() sets --hp inline on <html> (with --u and --d): placePerf() reads documentElement.style --hp as a cheap change signal (if it moved elsewhere, the overlay offset would only go stale until the next resize). It is main.js\'s only "--hp" string: a second setter (on <body>, say, which #hudright would inherit instead) would move the buttons without that signal' },
-  // Better Options 1.2: F2 and "Run benchmark" are ignored while one of the game's editors is open, found by
+  // Better Options 1.2: "Run benchmark" is ignored while one of the game's editors is open, found by
   // document.querySelector('.se, .sp, #sign-editor, #book-screen'), where presence means open
-  { script: [OPTIONS, ZOOM], file: 'js/skin-editor.js', test: /\bconst\s+(\w+)\s*=\s*\w+\(\s*["']div["']\s*,\s*\{\s*class\s*:\s*["']se["']\s*,\s*role\s*:\s*["']dialog["'](?=[\s\S]*\bdocument\.body\.append\(\s*\1\s*\))(?=[\s\S]*\b\1\.remove\(\))/, why: 'the skin editor is a div.se dialog appended to <body> while open and removed on close: a .se element means it is open. Better Options ignores F2 then, and Zoom\'s canZoom() refuses, because Ctrl+Z is the editor\'s undo and #screen can be off behind it (wardrobe.js opens it after awaiting image loads)' },
+  { script: [OPTIONS, ZOOM], file: 'js/skin-editor.js', test: /\bconst\s+(\w+)\s*=\s*\w+\(\s*["']div["']\s*,\s*\{\s*class\s*:\s*["']se["']\s*,\s*role\s*:\s*["']dialog["'](?=[\s\S]*\bdocument\.body\.append\(\s*\1\s*\))(?=[\s\S]*\b\1\.remove\(\))/, why: 'the skin editor is a div.se dialog appended to <body> while open and removed on close: a .se element means it is open. Better Options won\'t run a benchmark then, and Zoom\'s canZoom() refuses, because Ctrl+Z is the editor\'s undo and #screen can be off behind it (wardrobe.js opens it after awaiting image loads)' },
   { script: OPTIONS, file: 'js/skin-preview.js', test: /\bconst\s+(\w+)\s*=\s*\w+\(\s*["']div["']\s*,\s*\{\s*class\s*:\s*["']sp["']\s*,\s*role\s*:\s*["']dialog["'](?=[\s\S]*\bdocument\.body\.append\(\s*\1\s*\))(?=[\s\S]*\b\1\.remove\(\))/, why: 'the skin import preview is a div.sp dialog appended to <body> while open and removed on close: a .sp element means it is open' },
   { script: OPTIONS, file: 'js/signs.js', test: /^(?=[\s\S]*\b(\w+)\.id\s*=\s*["']sign-editor["'][\s\S]*?\bdocument\.body\.append\(\s*\1\s*\))(?=[\s\S]*\b(\w+)\s*=\s*this\.editor\s*;[\s\S]{0,80}?\b\2\.el\.remove\(\))/, why: 'the sign editor is a div#sign-editor appended to <body> while open and removed when done: #sign-editor means it is open' },
   { script: OPTIONS, file: 'js/survival/book.js', test: /\b(\w+)\.id\s*=\s*["']book-screen["'](?=[\s\S]*\bdocument\.body\.append\(\s*\1\s*\))(?=[\s\S]*\.ui\.el\.remove\(\))/, why: 'the book screen is a div#book-screen appended to <body> while open and removed on close: #book-screen means it is open' },
-  { script: OPTIONS, file: 'index.html', test: /^(?![\s\S]*\bclass=["'](?:[^"']*\s)?(?:se|sp)(?:\s[^"']*)?["'])(?![\s\S]*\bid=["'](?:sign-editor|book-screen)["'])/, why: 'the page has no permanent .se, .sp, #sign-editor or #book-screen element (it would make Better Options think an editor is always open: F2 would be ignored, and a benchmark would never reopen our menu)' },
+  { script: OPTIONS, file: 'index.html', test: /^(?![\s\S]*\bclass=["'](?:[^"']*\s)?(?:se|sp)(?:\s[^"']*)?["'])(?![\s\S]*\bid=["'](?:sign-editor|book-screen)["'])/, why: 'the page has no permanent .se, .sp, #sign-editor or #book-screen element (it would make Better Options think an editor is always open: a benchmark would never reopen our menu)' },
   // Better Options 1.2: the benchmark screen is watched (MutationObserver) and stops the run when the game replaces it
   { script: OPTIONS, file: 'js/menus.js', test: /\bconst\s+(\w+)\s*=\s*document\.querySelector\(\s*["']#screen["']\s*\)\s*,\s*(\w+)\s*=\s*document\.querySelector\(\s*["']#screen \.inner["']\s*\)(?![\s\S]*(?<![.\w])\2\s*=(?!=))(?![\s\S]*(?<![.\w])(?:\1|\2)\.(?:remove|replaceWith|outerHTML)\b)(?=[\s\S]*\bfunction\s+showScreen\(\s*\w+\s*,\s*(\w+)\s*,\s*(\w+)\s*\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,600}?\b\2\.replaceChildren\(\s*\.\.\.\3\(\)\.filter\(\s*Boolean\s*\)\s*\)\s*;\s*\1\.className\s*=\s*["']on["']\s*\+\s*\(\s*\4\s*\?)(?=[\s\S]*\bfunction\s+closeMenu\(\)\s*\{(?:(?!\bfunction\b)[\s\S]){0,400}?\b\1\.className\s*=\s*["']["']\s*;\s*\2\.replaceChildren\(\s*\))/, why: 'menus.js looks #screen and #screen .inner up once and never replaces them; showScreen() replaces .inner\'s children and sets #screen\'s class, closeMenu() sets class "" and empties .inner: an observer on #screen[class] and .inner\'s child list sees every screen change, so the benchmark stops as soon as the game takes its screen away' },
   { script: OPTIONS, file: 'js/main.js', test: /\bfunction\s+(\w+)\(\s*(\w+)\s*\)\s*\{(?:(?!\bfunction\s+\w+\s*\()[\s\S])*?\bif\s*\(\s*(\w+)\.menu\s*\)\s*\{(?:(?!\bfunction\b)[^{}])*?\bif\s*\(\s*\2\.code\s*===\s*["']Escape["'][^{}]*?\)\s*\{\s*\2\.preventDefault\(\)\s*;\s*if\s*\(\s*\3\.menuName\s*===\s*["']pause["']\s*\)\s*\w+\(\)\s*;?\s*else\s+\w+\.back\(\)\s*;?\s*\}\s*return\s*;?\s*\}[\s\S]*[{;]\s*addEventListener\(\s*["']keydown["']\s*,\s*\1\s*\)/, why: 'with a menu open, the game handles Escape only in its window keydown listener (bubble phase, no capture): it calls M.back() (which would open the pause menu over the benchmark) and returns. Our capture-phase window listener runs first, so on the benchmark screen it consumes Escape (stopImmediatePropagation) and stops the run instead' },
@@ -374,7 +369,7 @@ export const source = [
   { script: OPTIONS, file: 'js/menus.js', test: /^(?![\s\S]*["']pause\.options["'][\s\S]*["']pause\.options["'][\s\S]*["']pause\.options["'])(?=[\s\S]*\bfunction showTitle\([^)]*\)\s*\{(?:(?!\bfunction\b)[\s\S])*?\bshowScreen\(\s*["']title["']\s*,(?:(?!\bfunction\b)[\s\S])*?\}\s*,\s*["']title["']\s*\)\s*;?\s*\})(?:(?=[\s\S]*\bfunction showTitle\((?:(?!\bfunction\b)[\s\S])*?\bbtn\(\s*\w+\(\s*["']pause\.options["']\s*\)\s*,\s*openOptions\s*\)(?:(?!\bfunction\b)[\s\S])*?\}\s*,\s*["']title["']\s*\)\s*;?\s*\})|(?![\s\S]*["']pause\.options["'][\s\S]*["']pause\.options["']))/, why: 'showTitle() passes the look "title" and has the pause.options button too (staging still lacks that button), and no third screen has it: only openPause() has the button with "dim", so prime() can never take the title for the pause menu and destroy it' },
 
   // --- Chat history
-  { script: [CHAT, OPTIONS, ZOOM], file: 'index.html', test: 'id="chatbox"', why: 'history attaches to the #chatbox input; Better Options reads #chatbox.hidden to tell whether chat is open (F2 is ignored, the benchmark refuses to start, our menu never opens over chat)' },
+  { script: [CHAT, OPTIONS, ZOOM], file: 'index.html', test: 'id="chatbox"', why: 'history attaches to the #chatbox input; Better Options reads #chatbox.hidden to tell whether chat is open (the benchmark refuses to start, our menu never opens over chat)' },
   { script: [CHAT, OPTIONS], file: 'index.html', test: /<input\b(?=[^>]*\sid=["']chatbox["'])(?=[^>]*\shidden[\s=/>])[^>]*>/, why: '#chatbox is an <input> (value, setSelectionRange), hidden while chat is closed: a visible #chatbox means chat is open (history, and Better Options\' chatOpen())' },
   { script: [CHAT, OPTIONS, ZOOM], file: 'js/main.js', test: /^(?=[\s\S]*\b(\w+)\s*=\s*[\w$.]+\(\s*["']#chatbox["']\s*\))(?=[\s\S]*\.chatOpen\s*=\s*true\s*;[^}]*?\b\1\.hidden\s*=\s*false)(?=[\s\S]*\.chatOpen\s*=\s*false\s*;[^}]*?\b\1\.hidden\s*=\s*true)/, why: 'chat opens by setting S.chatOpen = true and then #chatbox.hidden = false, and closes with chatOpen = false and, after resetting its IME and opacity state, hidden = true: chatOpen() reads #chatbox.hidden' },
   { script: CHAT, file: 'js/main.js', test: /\.chatOpen\s*\)\s*\{\s*(?:if\s*\(\s*\w+\(\s*\w+\s*\)\s*\)\s*return\s*;\s*)?if\s*\(\s*\w+\.key\(\s*\w+\s*\)\s*\)\s*\w+\.preventDefault\(\)\s*;\s*else\s+if\s*\(\s*\w+\.key\s*===\s*["']Enter["']\s*\)/, why: 'chat is sent on keydown Enter (recorded first in our capture listener, which skips e.isComposing keys; the game\'s composing() guard also skips keyCode 229); the suggestion list claims keys with preventDefault' },
@@ -844,7 +839,7 @@ export const runtime = [
       let changes = 0, last = pub();
       while (performance.now() - t0 < 3000 || (T.state.frame - f0 < 8 && performance.now() - t0 < 30000)) {
         await new Promise(r => setTimeout(r, 100));
-        if (T.perf !== P) return 'Twitterentary.perf was replaced by a new object: it must be mutated in place (the overlay and bench keep a reference)';
+        if (T.perf !== P) return 'Twitterentary.perf was replaced by a new object: it must be mutated in place (anything holding a reference would read stale numbers)';
         const s = pub();
         if (s !== last) { changes++; last = s; }
       }
@@ -892,7 +887,7 @@ export const runtime = [
       // windows are out of phase, so here the median gap may be 2 frames or a fifth: enough to catch a different window.
       const gaps = mine.map((m, i) => Math.abs(m - theirs[i])).sort((a, b) => a - b), most = Math.max(2, Math.ceil(Math.max(...mine) / 5));
       if (gaps[1] > most) return `perf.fpsGame read ${theirs.join(', ')} while the game's formula gave ${mine.join(', ')}: more than ${most} apart`;
-      // F2 must still count with the shaders off (K), when the game's own number certainly does
+      // It must still count with the shaders off (the toggle), when the game's own number certainly does
       const was = T.cfg.enabled;
       try {
         T.cfg.enabled = false; // in memory only
@@ -1004,7 +999,7 @@ export const runtime = [
       }
       return out;
     } },
-  { script: SHADERS, name: 'bench.abort() stops a run at once: settings and tc.shader.* restored and running false before it returns, the promise resolves within a microtask with the finished rows and aborted: true, a new bench can start right after, and K (the shader toggle) is ignored while one runs',
+  { script: SHADERS, name: 'bench.abort() stops a run at once: settings and tc.shader.* restored and running false before it returns, the promise resolves within a microtask with the finished rows and aborted: true, a new bench can start right after, and F2 (the shader toggle) is ignored while one runs',
     run: async () => {
       const T = window.Twitterentary;
       if (!T || typeof T.bench !== 'function' || typeof T.set !== 'function' || typeof T.reset !== 'function' || typeof T.stress !== 'function') return 'window.Twitterentary.bench/set/reset/stress missing';
@@ -1019,8 +1014,8 @@ export const runtime = [
       // current microtask checkpoint)
       const track = p => { const t = { done: false, value: undefined, error: null }; p.then(v => { t.done = true; t.value = v; }, e => { t.done = true; t.error = e || new Error('rejected'); }); return t; };
       const settle = async (t, ms = 60000) => { const t0 = performance.now(); while (!t.done && performance.now() - t0 < ms) await sleep(50); return t.done; };
-      // a K keydown on the page; returns what tc.shader.enabled reads right after
-      const key = () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyK', key: 'k', bubbles: true, cancelable: true })); return { saved: localStorage.getItem(PFX + 'enabled') }; };
+      // an F2 keydown on the page; returns what tc.shader.enabled reads right after
+      const key = () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { code: 'F2', key: 'F2', bubbles: true, cancelable: true })); return { saved: localStorage.getItem(PFX + 'enabled') }; };
       const ls0 = saved(), cfg0 = Object.assign({}, T.cfg), bad = [];
       let out = true;
       try {
@@ -1039,9 +1034,9 @@ export const runtime = [
         while (!tr.done && !inSecond() && performance.now() - t0 < 40000) await sleep(50);
         if (tr.done || !inSecond()) bad.push(`can't verify: the second scenario never started (bench ${tr.done ? 'already settled' : 'still running'}, cfg.enabled ${T.cfg.enabled}, shadows ${T.cfg.shadows}, stress ${JSON.stringify(T.debug().stress)})`);
         else {
-          // K (the shader toggle) is ignored while a bench runs: it would save enabled and skew the row
+          // F2 (the shader toggle) is ignored while a bench runs: it would save enabled and skew the row
           const k = key();
-          if (T.cfg.enabled !== true || k.saved !== null) bad.push(`K during a bench toggled the shaders (cfg.enabled ${T.cfg.enabled}, tc.shader.enabled ${JSON.stringify(k.saved)}): it must be ignored while bench.running`);
+          if (T.cfg.enabled !== true || k.saved !== null) bad.push(`F2 during a bench toggled the shaders (cfg.enabled ${T.cfg.enabled}, tc.shader.enabled ${JSON.stringify(k.saved)}): it must be ignored while bench.running`);
           const ret = T.bench.abort();
           // all of this must already hold when abort() returns (Better Options reopens its menu right away)
           const now = { running: T.bench.running, cfg: cfgNow(), ls: JSON.stringify(saved()), st: stressNow(), done: tr.done };
@@ -1078,9 +1073,9 @@ export const runtime = [
         else if ('aborted' in t3.value || !Array.isArray(t3.value.rows) || t3.value.rows.map(r => r && r.name).join() !== 'off') bad.push(`a bench after two aborts gave ${JSON.stringify({ aborted: t3.value.aborted, rows: t3.value.rows && t3.value.rows.map(r => r && r.name) })}, expected the "off" row and no aborted key`);
         if (T.bench.running !== false) bad.push(`bench.running is ${JSON.stringify(T.bench.running)} at the end`);
         if (JSON.stringify(saved()) !== lsB || cfgNow() !== cfgB) bad.push('settings or tc.shader.* differ from before the benches at the end');
-        // control: with no bench running K does toggle (twice: back where it was; `finally` restores the saved keys)
+        // control: with no bench running the toggle key does toggle (twice: back where it was; `finally` restores the saved keys)
         const e0 = T.cfg.enabled; key(); const e1 = T.cfg.enabled; key(); const e2 = T.cfg.enabled;
-        if (e1 === e0 || e2 !== e0) bad.push(`K with no bench running gave cfg.enabled ${e0} -> ${e1} -> ${e2}, expected a toggle per press (without it the "K is ignored during a bench" test proves nothing)`);
+        if (e1 === e0 || e2 !== e0) bad.push(`F2 with no bench running gave cfg.enabled ${e0} -> ${e1} -> ${e2}, expected a toggle per press (without it the "F2 is ignored during a bench" test proves nothing)`);
         if (bad.length) out = bad.slice(0, 8).join('; ');
       } catch (e) {
         out = `threw: ${e.message}`;
@@ -1161,57 +1156,224 @@ export const runtime = [
       await __tcwait(() => st.frame >= f2 + 6, 20000); // 6 frames with it off (up to 20 s on a slow runner)
       return why('move') === m1 || `camera-movement redraws continued after stress({}) although the title camera only turns: stats.why.move ${m1} -> ${why('move')}`;
     } },
-  // --- Better Options 1.2: performance overlay (#tc-perf) and its keybind
-  { script: OPTIONS, name: 'the performance overlay keybind (tc.perfOverlay) defaults to F2, a key no game module handles, and no other mod keybind uses it',
-    run: () => {
-      const bus = window.__tcOptions;
-      if (!bus || typeof bus._keybinds !== 'function') return 'window.__tcOptions._keybinds missing';
-      const list = bus._keybinds() || [], kb = list.find(k => k && k.id === 'tc.perfOverlay');
-      if (!kb) return `no tc.perfOverlay keybind registered (registered: ${list.map(k => k && k.id).join(', ') || 'none'})`;
-      if (kb.key !== 'F2') return `tc.perfOverlay is on ${JSON.stringify(kb.key)} on a fresh profile, expected F2 (the key compat proves the game does not use)`;
-      const clash = list.filter(k => k && k !== kb && k.key === kb.key);
-      return !clash.length || `F2 is also the key of ${clash.map(k => k.id).join(', ')}`;
-    } },
-  { script: OPTIONS, name: 'F2 toggles the performance overlay (#tc-perf, saved as perf.overlay), which shows the live Twitterentary.perf numbers',
+  // --- Better Options 1.5: the F2 performance overlay is gone. Its numbers are two lines on the game's own F3 screen, and F2 is
+  // the shader toggle's default key.
+  { script: OPTIONS, name: 'the performance overlay is gone: no #tc-perf or styles for it, no tc.perfOverlay keybind, no perf.overlay or perf.key setting, F2 leaves all of that alone, and no other mod keybind sits on the shader toggle\'s F2',
     run: async () => {
-      const bus = window.__tcOptions;
-      if (!bus || typeof bus.get !== 'function' || typeof bus.set !== 'function') return 'window.__tcOptions.get/set missing';
+      const bus = window.__tcOptions, T = window.Twitterentary;
+      if (!bus || typeof bus._keybinds !== 'function') return 'window.__tcOptions._keybinds missing';
       if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
-      const el = () => document.getElementById('tc-perf');
-      const shown = () => !!el() && !el().hidden && getComputedStyle(el()).display !== 'none';
-      const line = k => { const x = el() && el().querySelector(`[data-l="${k}"]`); return x && !x.hidden ? x.textContent.trim() : null; };
-      const press = () => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F2', key: 'F2', bubbles: true, cancelable: true }));
-      if (bus.get('perf.overlay')) return `can't verify: perf.overlay is ${JSON.stringify(bus.get('perf.overlay'))} on a fresh profile, expected off`;
-      if (shown()) return '#tc-perf is shown while perf.overlay is off';
+      const bad = [], list = bus._keybinds() || [], json = JSON.stringify;
+      const ENABLED = 'tc.shader.enabled', enabled0 = localStorage.getItem(ENABLED), options0 = localStorage.getItem('tc.options');
+      const check = what => {
+        if (document.getElementById('tc-perf')) bad.push(`#tc-perf is in the page ${what}`);
+        for (const k of ['perf.overlay', 'perf.key']) if (k in bus.config || bus.get(k) !== undefined) bad.push(`${k} is a setting ${what}: ${json(bus.get(k))}`);
+      };
+      check('on a fresh profile');
+      // a fresh profile proves nothing about the startup clean-up, so plant what 1.4 saved and run that step
+      if (typeof bus._dropStale !== 'function') bad.push('bus._dropStale is missing');
+      else {
+        bus.config['perf.overlay'] = true; bus.config['perf.key'] = 'F9';
+        bus._dropStale();
+        check('after the startup clean-up');
+        const kept = JSON.parse(localStorage.getItem('tc.options') || '{}');
+        if ('perf.overlay' in kept || 'perf.key' in kept) bad.push('the startup clean-up did not save the removal');
+        if (options0 === null) localStorage.removeItem('tc.options'); else localStorage.setItem('tc.options', options0); // the F2 check below compares against this
+      }
+      if ([...document.querySelectorAll('style')].some(s => s.textContent.includes('tc-perf'))) bad.push('a <style> still targets #tc-perf');
+      if (list.some(k => k && k.id === 'tc.perfOverlay')) bad.push('the tc.perfOverlay keybind is still registered');
       const a = document.activeElement;
       if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) a.blur(); // keys are ignored while typing
-      let out = true;
-      try {
-        press();
-        if (!(await __tcwait(() => shown() && bus.get('perf.overlay') === true, 2000))) return `F2 did not show #tc-perf (perf.overlay ${JSON.stringify(bus.get('perf.overlay'))}, element ${el() ? 'hidden' : 'missing'})`;
-        const T = window.Twitterentary;
-        if (T && T.perf) {
-          await new Promise(r => setTimeout(r, 600)); // past the first 250 ms refresh
-          const n = '(?:\\d+(?:\\.\\d+)?|--)', bad = [];
-          if (!new RegExp(`^${n} FPS · ${n} ms$`).test(line('fps') || '')) bad.push(`fps line "${line('fps')}"`);
-          if (!new RegExp(`^CPU ${n} ms · GPU (?:${n} ms|n/a)$`).test(line('cpu') || '')) bad.push(`cpu line "${line('cpu')}"`);
-          // 1.5.1: there is no render scale, so no Scale line
-          if (el().querySelector('[data-l="scale"]')) bad.push('the overlay still has a Scale line');
-          if (!/^Shadows (\d+\/min|off)$/.test(line('shadow') || '')) bad.push(`shadow line "${line('shadow')}"`);
-          // The FPS line shows perf.fpsGame when it is finite and > 0, else perf.fps. Written until the 250 ms poll shows it,
-          // because the shader script rewrites the field each time its one-second window closes.
-          const P = T.perf, shown = () => parseFloat(line('fps') || '');
-          const hold = async (v, test) => { const t0 = performance.now(); while (performance.now() - t0 < 4000) { P.fpsGame = v; await new Promise(r => setTimeout(r, 50)); if (test()) return true; } return false; };
-          if (!(await hold(98765, () => shown() === 98765))) bad.push(`fps line "${line('fps')}" never showed perf.fpsGame = 98765: F2 would not match F3`);
-          else if (!(await hold(0, () => shown() !== 98765 && Math.abs(shown() - P.fps) <= Math.max(1, P.fps / 5)))) bad.push(`with perf.fpsGame = 0 the fps line "${line('fps')}" did not fall back to perf.fps ${P.fps}`);
-          if (bad.length) out = `the overlay text does not match its format: ${bad.join('; ')}`;
-        } else if (!/No performance data/.test(line('fps') || '')) out = `without Twitterentary.perf the overlay should say "No performance data", it says "${line('fps')}"`;
-        press();
-        if (out === true && !(await __tcwait(() => !shown() && bus.get('perf.overlay') === false, 2000))) out = `a second F2 did not hide #tc-perf (perf.overlay ${JSON.stringify(bus.get('perf.overlay'))})`;
-      } finally {
-        if (bus.get('perf.overlay')) bus.set('perf.overlay', false);
+      const press = () => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F2', key: 'F2', bubbles: true, cancelable: true }));
+      press();
+      await new Promise(r => setTimeout(r, 300));
+      check('after an F2 press');
+      if (localStorage.getItem('tc.options') !== options0) bad.push(`an F2 press changed tc.options: ${options0} became ${localStorage.getItem('tc.options')}`);
+      if (T) {
+        press(); // back: the first press toggled the shaders
+        if (enabled0 === null) localStorage.removeItem(ENABLED); else localStorage.setItem(ENABLED, enabled0);
+        const kb = list.find(k => k && k.id === 'tc.shaders.toggle');
+        if (!kb) bad.push(`no tc.shaders.toggle keybind registered (registered: ${list.map(k => k && k.id).join(', ') || 'none'})`);
+        else if (kb.key !== 'F2') bad.push(`tc.shaders.toggle is on ${json(kb.key)} on a fresh profile, expected F2 (the key compat proves the game does not use)`);
       }
-      return out;
+      const clash = list.filter(k => k && k.id !== 'tc.shaders.toggle' && k.key === 'F2');
+      if (clash.length) bad.push(`F2 is also the key of ${clash.map(k => k.id).join(', ')}`);
+      return !bad.length || bad.join('; ');
+    } },
+  // Drives our wrapper on a stand-in Hud class (bus._injectUi), so every case can be set up without a world or F3 on. A stand-in
+  // Twitterentary is enough, because the wrapper looks it up on every call. The strings are shared and rebuilt at most every
+  // 250 ms, so a case that changes perf or cfg waits gap() first. The stand-in is on window for about 5 s: it inherits from the real
+  // object, and the shaders themselves never read window.Twitterentary.
+  { script: OPTIONS, name: 'F3 gains "Shaders:" and "Shadows:" straight after the game\'s Frame: line, or at the end with no such line, without repeating FPS: CPU-bound only when true, GPU n/a without a number, Shadows off when cfg.shadows or cfg.enabled is false, rebuilt at most every 250 ms, and with no Twitterentary or one that throws the game\'s lines stay as they are',
+    run: async () => {
+      const bus = window.__tcOptions;
+      if (!bus || typeof bus._injectUi !== 'function' || typeof bus._patchHud !== 'function') return 'window.__tcOptions._injectUi/_patchHud missing';
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      const T0 = window.Twitterentary, hadT = 'Twitterentary' in window, base = T0 || {};
+      const scaleHad = 'ui.scale' in bus.config, scale0 = bus.config['ui.scale'];
+      const sleep = ms => new Promise(r => setTimeout(r, ms)), gap = () => sleep(270), json = JSON.stringify, bad = [];
+      let seen;
+      class FakeHud { draw(o) { seen = o; return 'drawn'; } }
+      const hud = new FakeHud();
+      const draw = debug => {
+        seen = undefined;
+        const r = hud.draw({ gs: 2, show: true, debug });
+        if (r !== 'drawn') bad.push(`the wrapper returned ${json(r)}, not what the game's draw() returned`);
+        if (!seen) { bad.push('the game\'s draw() was not called'); return undefined; }
+        return seen.debug;
+      };
+      const same = (got, want, what) => { if (json(got) !== json(want)) bad.push(`${what}: o.debug reads ${json(got)}, expected ${json(want)}`); };
+      const GAME = ['Tweetcraft (test)', '60 fps, 9 chunks, 0 particles', 'GPU: Test', 'Frame: 5.0 ms (worst 9, >50ms: 0), JS 1.0 ms', 'Ping: 20 ms', 'XYZ: 1 / 2 / 3'];
+      const NO_FRAME = GAME.filter(l => !l.startsWith('Frame:'));
+      const BASE = 'Shaders: CPU 4.1 ms, GPU 12.3 ms', SHADOWS = 'Shadows: 12/min';
+      const withLines = (cpu = BASE, shadows = SHADOWS) => { const i = GAME.findIndex(l => l.startsWith('Frame:')) + 1; return [...GAME.slice(0, i), cpu, shadows, ...GAME.slice(i)]; };
+      const stand = (perf, cfg = { shadows: true }) => { const t = Object.create(base); t.perf = perf; t.cfg = cfg; window.Twitterentary = t; };
+      const fake = (perf, cfg) => stand({ fps: 60, fpsGame: 60, ms: 16, cpuMs: 4.12, gpuMs: 12.34, cpuBound: false, shadowRefreshPerMin: 12.4, ...perf }, cfg);
+      try {
+        bus._injectUi({ Hud: FakeHud });
+        await bus._patchHud();
+        if (!FakeHud.prototype.draw.__tcScaled) return 'can\'t verify: _patchHud() did not wrap the stand-in Hud';
+        // Where the lines go
+        fake({});
+        await gap();
+        const got = draw([...GAME]);
+        same(got, withLines(), 'with a Frame: line');
+        if ((got || []).filter(l => /\bfps\b/i.test(l)).length !== 1) bad.push(`FPS is repeated: ${json(got)} (the game's own line already shows it)`);
+        same(draw([...NO_FRAME]), [...NO_FRAME, BASE, SHADOWS], 'with no Frame: line');
+        same(draw(['Frame: a', 'Frame: b']), ['Frame: a', BASE, SHADOWS, 'Frame: b'], 'with two Frame: lines');
+        same(draw(['Keyframe: a', 'x']), ['Keyframe: a', 'x', BASE, SHADOWS], 'with a line that only contains "Frame:"');
+        const again = [...GAME];
+        draw(again);
+        same(draw(again), withLines(), 'the same array drawn twice');
+        // What they say
+        for (const [what, perf, cfg, cpu, shadows] of [
+          ['cpuBound true', { cpuBound: true }, undefined, BASE + ', CPU-bound'],
+          ['cpuBound 1, which is not true', { cpuBound: 1 }],
+          ['gpuMs null', { gpuMs: null }, undefined, 'Shaders: CPU 4.1 ms, GPU n/a'],
+          ['gpuMs NaN', { gpuMs: NaN }, undefined, 'Shaders: CPU 4.1 ms, GPU n/a'],
+          ['gpuMs a string', { gpuMs: '12' }, undefined, 'Shaders: CPU 4.1 ms, GPU n/a'],
+          ['gpuMs 0, which is a number', { gpuMs: 0 }, undefined, 'Shaders: CPU 4.1 ms, GPU 0.0 ms'],
+          ['gpuMs null and cpuBound true', { gpuMs: null, cpuBound: true }, undefined, 'Shaders: CPU 4.1 ms, GPU n/a, CPU-bound'],
+          ['cpuMs not a number', { cpuMs: 'x' }, undefined, 'Shaders: CPU -- ms, GPU 12.3 ms'],
+          ['cfg.shadows false', {}, { shadows: false }, undefined, 'Shadows: off'],
+          ['shaders toggled off with shadows on: no misleading 0/min', { shadowRefreshPerMin: 0 }, { enabled: false, shadows: true }, undefined, 'Shadows: off'],
+          ['shaders on and shadows on', {}, { enabled: true, shadows: true }],
+          ['no redraws', { shadowRefreshPerMin: 0 }, undefined, undefined, 'Shadows: 0/min'],
+          ['shadowRefreshPerMin not a number', { shadowRefreshPerMin: null }, undefined, undefined, 'Shadows: --/min'],
+        ]) {
+          fake(perf, cfg);
+          await gap();
+          same(draw([...GAME]), withLines(cpu, shadows), what);
+        }
+        // UI scale above 1 goes through the wrapper's copy of o: the lines must survive it
+        bus.set('ui.scale', 2);
+        fake({});
+        await gap();
+        same(draw([...GAME]), withLines(), 'at UI scale 2');
+        if (seen && seen.gs !== 4) bad.push(`at UI scale 2 the game's draw() got gs ${seen.gs}, expected 4`);
+        bus.set('ui.scale', scaleHad ? scale0 : undefined);
+        // No Twitterentary, or nothing usable in it: at once, with the strings still cached
+        await gap();
+        same(draw([...GAME]), withLines(), 'before Twitterentary goes');
+        delete window.Twitterentary;
+        same(draw([...GAME]), GAME, 'without Twitterentary');
+        for (const perf of [undefined, null, 7]) { stand(perf); same(draw([...GAME]), GAME, `with perf ${json(perf)}`); }
+        // F3 off, or something that is no list
+        fake({});
+        await gap();
+        if (draw(null) !== null) bad.push('with F3 off (o.debug null) the wrapper changed o.debug');
+        if (draw(undefined) !== undefined) bad.push('with no o.debug the wrapper added one');
+        if (draw('Frame: x') !== 'Frame: x') bad.push('o.debug that is no array was changed');
+        // Anything that throws leaves the game's lines alone, and the lines come back once it stops
+        const boom = () => { throw new Error('planted'); };
+        for (const [what, make] of [
+          ['a throwing perf getter', () => { const t = Object.create(base); Object.defineProperty(t, 'perf', { get: boom }); t.cfg = { shadows: true }; window.Twitterentary = t; }],
+          ['a throwing perf.cpuMs getter', () => stand(Object.defineProperty({ gpuMs: 1, cpuBound: false, shadowRefreshPerMin: 1 }, 'cpuMs', { get: boom }))],
+          ['a throwing cfg getter', () => { const t = Object.create(base); t.perf = { cpuMs: 1, gpuMs: 1, cpuBound: false, shadowRefreshPerMin: 1 }; Object.defineProperty(t, 'cfg', { get: boom }); window.Twitterentary = t; }],
+        ]) {
+          make();
+          await gap();
+          let lines;
+          try { lines = draw([...GAME]); } catch (e) { bad.push(`${what}: the wrapper threw ${e.message}, and this runs in the game's frame`); continue; }
+          same(lines, GAME, what);
+          fake({});
+          await gap();
+          same(draw([...GAME]), withLines(), `after ${what} stopped`);
+        }
+        // At most every 250 ms, however often the game draws: every read of cpuMs gives a new number, so a line that changes was rebuilt
+        let reads = 0, draws = 0;
+        stand(Object.defineProperty({ gpuMs: 1, cpuBound: false, shadowRefreshPerMin: 1 }, 'cpuMs', { get: () => ++reads }));
+        await gap();
+        const texts = new Set(), t0 = performance.now();
+        while (performance.now() - t0 < 1300) { const l = draw([...GAME]); draws++; texts.add(l && l[GAME.indexOf(GAME.find(x => x.startsWith('Frame:'))) + 1]); await sleep(10); }
+        const most = Math.floor((performance.now() - t0) / 250) + 1;
+        if (texts.size > most) bad.push(`the Shaders: line took ${texts.size} values in ${Math.round(performance.now() - t0)} ms, more than one per 250 ms (at most ${most})`);
+        if (texts.size < 3) bad.push(`the Shaders: line took only ${texts.size} values in 1.3 s: ${json([...texts])}, so it is not being rebuilt`);
+        if (reads > most * 3) bad.push(`perf.cpuMs was read ${reads} times in ${draws} draws: it should be read on a rebuild, not on every frame`);
+        // The real thing: the names we read from Twitterentary really are there
+        if (hadT) window.Twitterentary = T0; else delete window.Twitterentary;
+        await gap();
+        const real = draw([...GAME]);
+        if (!T0) same(real, GAME, 'with no shader script loaded');
+        else {
+          const i = GAME.findIndex(l => l.startsWith('Frame:')) + 1;
+          if (!/^Shaders: CPU \d+\.\d ms, GPU (?:\d+\.\d ms|n\/a)(?:, CPU-bound)?$/.test((real || [])[i])) bad.push(`with the real Twitterentary the line reads ${json((real || [])[i])}`);
+          if (!/^Shadows: (?:\d+\/min|off)$/.test((real || [])[i + 1])) bad.push(`with the real Twitterentary the line reads ${json((real || [])[i + 1])}`);
+          if ((real || []).length !== GAME.length + 2) bad.push(`with the real Twitterentary o.debug is ${json(real)}`);
+        }
+      } catch (e) {
+        bad.push(`threw: ${e.message}`);
+      } finally {
+        if (hadT) window.Twitterentary = T0; else delete window.Twitterentary;
+        bus.set('ui.scale', scaleHad ? scale0 : undefined);
+        bus._injectUi(null);
+        await bus._patchHud();
+      }
+      if (window.Twitterentary !== T0) bad.push('window.Twitterentary was not put back');
+      const ui = await import('/js/ui.js');
+      if (!ui.Hud.prototype.draw.__tcScaled) bad.push('the real Hud.prototype.draw is no longer our wrapper');
+      return !bad.length || bad.slice(0, 8).join('; ');
+    } },
+  // The same code on the real Hud and the game's real loop: a spy outside our wrapper swaps in a test list for one frame (F3 can't
+  // be turned on from here) and records what the game's own font paints. On the title o.show is false, so the spy sets it too.
+  { script: OPTIONS, name: 'on the real Hud the game\'s own loop paints "Shaders:" and "Shadows:" right after Frame:',
+    run: async () => {
+      const bus = window.__tcOptions, T = window.Twitterentary;
+      if (!bus) return 'window.__tcOptions missing';
+      if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
+      if (!T) return true; // alone there is nothing to add: the fake-Hud check above covers that
+      const ui = await import('/js/ui.js'), P = ui.Hud.prototype, inner = P.draw;
+      if (!inner || !inner.__tcScaled) return 'can\'t verify: Hud.prototype.draw is not our wrapper';
+      const LINES = ['Tweetcraft (test)', 'Frame: 5.0 ms', 'Ping: 20 ms'], painted = [];
+      let state = 'waiting', error = '';
+      const spy = function (o) {
+        if (state !== 'waiting' || !this || !this.font || !o) return inner.call(this, o);
+        state = 'drawing';
+        const F = this.font, draw0 = F.draw, own = Object.prototype.hasOwnProperty.call(F, 'draw');
+        F.draw = function (x, s, ...rest) { if (typeof s === 'string') painted.push(s); return draw0.call(this, x, s, ...rest); };
+        try {
+          return inner.call(this, Object.assign({}, o, { show: true, debug: [...LINES], debugY: 0 }));
+        } catch (e) {
+          error = e.message;
+          return inner.call(this, o);
+        } finally {
+          if (own) F.draw = draw0; else delete F.draw;
+          state = 'done';
+        }
+      };
+      await new Promise(r => setTimeout(r, 270)); // past the 250 ms cache
+      try {
+        P.draw = spy;
+        if (!(await __tcwait(() => state === 'done', 20000))) return 'can\'t verify: the game drew no HUD frame in 20 s';
+      } finally {
+        P.draw = inner;
+      }
+      if (error) return `can't verify: the game's draw() threw with the test list on the title screen: ${error}`;
+      const i = painted.indexOf('Frame: 5.0 ms');
+      if (i < 0) return `the game's loop did not paint the test list: ${JSON.stringify(painted.slice(0, 20))}`;
+      const cpu = painted[i + 1], shadows = painted[i + 2];
+      if (!/^Shaders: CPU \d+\.\d ms, GPU (?:\d+\.\d ms|n\/a)(?:, CPU-bound)?$/.test(cpu || '') || !/^Shadows: (?:\d+\/min|off)$/.test(shadows || '') || painted[i + 3] !== 'Ping: 20 ms') return `painted after Frame: ${JSON.stringify(painted.slice(i + 1, i + 4))}`;
+      return true;
     } },
   // --- Better Options 1.3: "Copy all settings". Secrets are planted by name, never read: this check only writes and
   // removes them, in one synchronous block, so no game code can run while a fake value exists. The names are built by
@@ -1236,10 +1398,10 @@ export const runtime = [
         for (const k of [...planted, ...IDENTITY, ...OTHER]) localStorage.setItem(k, FAKE);
         localStorage.setItem(PFX + 'tcprobe', '1.5');
         // a key some other mod saved in tc.options: only the allow-listed names may come through
-        if (cfg) cfg[EXTRA] = FAKE;
+        if (cfg) { cfg[EXTRA] = FAKE; cfg['perf.overlay'] = true; cfg['perf.key'] = 'F9'; } // the last two: what 1.4 saved, and 1.5 no longer knows
         let o = {};
         try { o = JSON.parse(keep[OPT] || '{}') || {}; } catch (e) {}
-        o[EXTRA] = FAKE;
+        o[EXTRA] = FAKE; o['perf.overlay'] = true; o['perf.key'] = 'F9';
         localStorage.setItem(OPT, JSON.stringify(o));
         text = bus.settingsText();
         localStorage.setItem('mc.fov', '17.5'); // a reload while zoomed could leave this: the game itself ignores it
@@ -1249,7 +1411,7 @@ export const runtime = [
       } finally {
         for (const k of planted) localStorage.removeItem(k);
         localStorage.removeItem(PFX + 'tcprobe');
-        if (cfg) delete cfg[EXTRA];
+        if (cfg) { delete cfg[EXTRA]; delete cfg['perf.overlay']; delete cfg['perf.key']; }
         for (const [k, v] of Object.entries(keep)) { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); }
       }
       const stillThere = planted.filter(has);
@@ -1262,6 +1424,7 @@ export const runtime = [
       if (named) bad.push(`${named} secret key name(s) are in the output`);
       if (others.length) bad.push(`these key names are in the output: ${others.join(', ')}`);
       if (text.includes(EXTRA)) bad.push('a key outside the tc.options allow-list came through');
+      for (const k of ['perf.overlay', 'perf.key']) if (text.includes(k)) bad.push(`${k} (the removed performance overlay) is in the output`);
       let d;
       try { d = JSON.parse(text); } catch (e) { return `settingsText() is not JSON: ${e.message}`; }
       if (!text.includes('\n')) bad.push('settingsText() is not pretty-printed');
@@ -1283,7 +1446,7 @@ export const runtime = [
       if (!Z || !Z.zooming) { if (!(staleFov >= 30 && staleFov <= 110)) bad.push(`with mc.fov = 17.5 stored game.fov reads ${JSON.stringify(staleFov)}: a zoomed FOV must never be reported`); }
       if (!d.shaders || d.shaders.tcprobe !== 1.5) bad.push(`shaders.tcprobe is ${JSON.stringify(d.shaders && d.shaders.tcprobe)}: every tc.shader.* key should be there with its prefix stripped`);
       if (T) for (const f of T.schema) if (f && f.key && !(d.shaders && f.key in d.shaders)) { bad.push(`shaders has no ${f.key}`); break; }
-      const ALLOW = ['ui.scale', 'hud.on', 'input.sens', 'keys.map', 'keys.mute', 'perf.overlay', 'perf.key', 'zoom.key', 'zoom.level', 'zoom.look'];
+      const ALLOW = ['ui.scale', 'hud.on', 'input.sens', 'keys.map', 'keys.mute', 'zoom.key', 'zoom.level', 'zoom.look'];
       const extra = Object.keys(d.options || {}).filter(k => !ALLOW.includes(k));
       if (!d.options || extra.length) bad.push(`options has keys outside the allow-list: ${extra.join(', ') || String(d.options)}`);
       return !bad.length || bad.slice(0, 8).join('; ');
@@ -1505,7 +1668,7 @@ export const runtime = [
       if (look() !== look0) bad.push(`the screen was not restored: ${look()}`);
       return !bad.length || bad.join('; ');
     } },
-  { script: OPTIONS, name: 'the Graphics tab toggles the performance overlay, and the Shaders tab offers "Run benchmark" and shows the last result with "Copy results"',
+  { script: OPTIONS, name: 'the Graphics and Keybinds tabs have no performance overlay row, and the Shaders tab offers "Run benchmark" and shows the last result with "Copy results"',
     run: async () => {
       const M = await import('/js/menus.js');
       if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
@@ -1518,7 +1681,7 @@ export const runtime = [
       const show = async n => { const b = tab(n); if (!b) return false; b.click(); await __tcwait(() => { const x = tab(n); return x && x.classList.contains('on'); }, 1500); await sleep(100); return true; };
       const button = l => all('#screen .inner button').find(b => b.getAttribute('aria-label') === l);
       const labels = () => all('#screen .inner button.mcb').map(b => b.getAttribute('aria-label')).join(' | ');
-      const overlay = () => { const e = document.getElementById('tc-perf'); return !!e && !e.hidden; };
+      const overlayRow = () => all('#screen .inner button, #screen .inner .tc-cap').map(b => b.getAttribute('aria-label') || b.textContent.trim()).filter(t => /performance overlay/i.test(t));
       const last = bus.get('bench.last');
       const issues = [];
       let start = null;
@@ -1528,15 +1691,10 @@ export const runtime = [
         await sleep(300); // opening also steals the FOV slider, which reopens our screen
         start = (all('#screen .inner .tc-tabs button.on')[0] || { getAttribute: () => null }).getAttribute('aria-label');
         if (!(await show('Graphics'))) issues.push('no Graphics tab');
-        else if (!button('Performance overlay: OFF')) issues.push(`Graphics tab: no "Performance overlay: OFF" toggle (buttons: ${labels()})`);
-        else {
-          button('Performance overlay: OFF').click();
-          if (!(await __tcwait(() => button('Performance overlay: ON') && overlay() && bus.get('perf.overlay') === true, 2000))) issues.push(`clicking "Performance overlay: OFF" did not turn the overlay on (overlay shown ${overlay()}, perf.overlay ${JSON.stringify(bus.get('perf.overlay'))})`);
-          else {
-            button('Performance overlay: ON').click();
-            if (!(await __tcwait(() => button('Performance overlay: OFF') && !overlay() && bus.get('perf.overlay') === false, 2000))) issues.push('clicking "Performance overlay: ON" did not turn the overlay off');
-          }
-        }
+        else if (!labels()) issues.push('can\'t verify: the Graphics tab shows no buttons');
+        else if (overlayRow().length) issues.push(`Graphics tab: an overlay row is still there: ${JSON.stringify(overlayRow())}`);
+        if (!(await show('Keybinds'))) issues.push('no Keybinds tab');
+        else if (overlayRow().length) issues.push(`Keybinds tab: an overlay row is still there: ${JSON.stringify(overlayRow())}`);
         if (T && typeof T.bench === 'function') {
           // a stored result, as "Run benchmark" leaves one, so the results block renders without running a bench
           bus.set('bench.last', { at: Date.now(), bo: 'smoke', env: { gpu: 'Smoke GPU', w: 1280, h: 720, dpr: 1, version: String(T.version), timer: false },
@@ -1573,7 +1731,6 @@ export const runtime = [
         issues.push(`threw: ${e.message}`);
       } finally {
         try { bus.set('bench.last', last === undefined ? null : last); } catch (e) {}
-        if (bus.get('perf.overlay')) bus.set('perf.overlay', false);
         try { if (marker() && start) await show(start); } catch (e) {} // leave our menu on the tab it opened with
         if (before) M.back(); else M.closeMenu(); // restore
       }
@@ -2043,9 +2200,10 @@ export const runtime = [
       }
       return !bad.length || bad.join('; ');
     } },
-  // Shaders 1.5.2: the toggle moved from a hard-wired K to a keybind. T.reset() also clears every other tc.shader.* key, so
-  // this puts back what it found.
-  { script: [SHADERS, OPTIONS], name: 'the shader toggle is keybind tc.shaders.toggle: default K, a rebind moves it, a modifier can be the key, Ctrl, Cmd or Alt held with another key does nothing, and Twitterentary.reset() brings K back',
+  // Shaders 1.5.2: the toggle moved from a hard-wired K to a keybind. Shaders 1.5.3 moved its default to F2, the key the old
+  // performance overlay gave up, and left K to the game. T.reset() also clears every other tc.shader.* key, so this puts back
+  // what it found.
+  { script: [SHADERS, OPTIONS], name: 'the shader toggle is keybind tc.shaders.toggle: default F2, whose press is preventDefaulted, K does nothing, a rebind moves it and a saved custom key wins (K included), a modifier can be the key, Ctrl, Cmd or Alt held with another key does nothing, and Twitterentary.reset() brings F2 back',
     run: async () => {
       const M = await import('/js/menus.js');
       if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
@@ -2072,7 +2230,9 @@ export const runtime = [
       // true when a press of `code` flips the shaders; a second press flips them back
       const press = (code, mods) => document.body.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true, ...mods }));
       const flips = (code, mods) => { const was = T.cfg.enabled; press(code, mods); const did = T.cfg.enabled !== was; if (did) press(code, mods); return did; };
-      if (key() !== 'KeyK') return `tc.shaders.toggle is on ${JSON.stringify(key())} on a fresh profile, expected KeyK (registered: ${(bus._keybinds() || []).map(k => k && k.id).join(', ')})`;
+      // whether a press was preventDefaulted, and whether it toggled; a press that toggled is undone
+      const prevented = code => { const was = T.cfg.enabled, e = new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true }); document.body.dispatchEvent(e); const did = T.cfg.enabled !== was; if (did) press(code); return { prevented: e.defaultPrevented, did }; };
+      if (key() !== 'F2') return `tc.shaders.toggle is on ${JSON.stringify(key())} on a fresh profile, expected F2 (registered: ${(bus._keybinds() || []).map(k => k && k.id).join(', ')})`;
       if (localStorage.getItem(STORE) !== null) return `can't verify: ${STORE} is saved (${localStorage.getItem(STORE)}) before the test`;
       const ls0 = saved(), cfg0 = Object.assign({}, T.cfg), bad = [];
       let start = null;
@@ -2082,15 +2242,21 @@ export const runtime = [
         await sleep(300);
         start = (all('#screen .inner .tc-tabs button.on')[0] || { getAttribute: () => null }).getAttribute('aria-label');
         if (!(await show('Keybinds'))) return 'no Keybinds tab';
-        if (!flips('KeyK')) bad.push('K did not toggle the shaders before any rebind');
+        if (!flips('F2')) bad.push('F2 did not toggle the shaders before any rebind');
+        if (flips('KeyK')) bad.push('K toggled the shaders on a fresh profile: it is no longer our key');
+        const hit = prevented('F2');
+        if (!hit.did || !hit.prevented) bad.push(`a toggling F2 press: toggled ${hit.did}, preventDefault called ${hit.prevented}: both should be true, because the game does not prevent F2`);
         const free = bind('KeyJ');
         if (/game key/.test(free)) bad.push(`binding J warned (#note ${JSON.stringify(free)}), and J is free`);
         if (key() !== 'KeyJ' || localStorage.getItem(STORE) !== 'KeyJ') bad.push(`after a rebind to J the key is ${key()} and ${STORE} is ${JSON.stringify(localStorage.getItem(STORE))}`);
-        if (flips('KeyK')) bad.push('after a rebind to J, K still toggles the shaders');
+        if (flips('F2')) bad.push('after a rebind to J, F2 still toggles the shaders');
         if (!flips('KeyJ')) bad.push('after a rebind to J, J does not toggle the shaders');
+        // The control for the check above: with F2 no longer the toggle nothing prevents it, so that preventDefault was ours
+        const left = prevented('F2');
+        if (left.did || left.prevented) bad.push(`after a rebind to J an F2 press: toggled ${left.did}, preventDefault called ${left.prevented}: both should be false`);
         T.reset();
-        if (key() !== 'KeyK' || localStorage.getItem(STORE) !== null) bad.push(`after reset() the key is ${key()} and ${STORE} is ${JSON.stringify(localStorage.getItem(STORE))}, expected KeyK and nothing saved`);
-        if (!flips('KeyK')) bad.push('after reset(), K does not toggle the shaders');
+        if (key() !== 'F2' || localStorage.getItem(STORE) !== null) bad.push(`after reset() the key is ${key()} and ${STORE} is ${JSON.stringify(localStorage.getItem(STORE))}, expected F2 and nothing saved`);
+        if (!flips('F2')) bad.push('after reset(), F2 does not toggle the shaders');
         if (flips('KeyJ')) bad.push('after reset(), J still toggles the shaders');
         // A modifier's own keydown has its flag set, so the flag can't count against it when it is the bound key
         for (const [code, mods] of [['AltLeft', { altKey: true }], ['ControlRight', { ctrlKey: true }], ['MetaLeft', { metaKey: true }]]) {
@@ -2101,9 +2267,15 @@ export const runtime = [
         bind('KeyJ');
         if (!flips('KeyJ')) bad.push('bound to J, J does not toggle the shaders');
         for (const mods of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }]) if (flips('KeyJ', mods)) bad.push(`${Object.keys(mods)[0]}+J toggled the shaders`);
-        const back = bind('KeyK'); // K is a game key too (blueprints), so this warns; the default is stored as nothing
-        if (!/also a game key/.test(back)) bad.push(`binding K did not warn (#note ${JSON.stringify(back)})`);
-        if (key() !== 'KeyK' || localStorage.getItem(STORE) !== null) bad.push(`bound back to K the key is ${key()} and ${STORE} is ${JSON.stringify(localStorage.getItem(STORE))}`);
+        // K is a custom key now, and a game key too (blueprints): this warns, it is saved, and it wins over the default
+        const custom = bind('KeyK');
+        if (!/also a game key/.test(custom)) bad.push(`binding K did not warn (#note ${JSON.stringify(custom)})`);
+        if (key() !== 'KeyK' || localStorage.getItem(STORE) !== 'KeyK') bad.push(`bound to K the key is ${key()} and ${STORE} is ${JSON.stringify(localStorage.getItem(STORE))}, expected KeyK saved`);
+        if (!flips('KeyK')) bad.push('bound to K, K does not toggle the shaders');
+        if (flips('F2')) bad.push('bound to K, F2 still toggles the shaders');
+        const back = bind('F2'); // the default is stored as nothing, and F2 is free
+        if (back) bad.push(`binding F2 said something (#note ${JSON.stringify(back)}): it is no game key`);
+        if (key() !== 'F2' || localStorage.getItem(STORE) !== null) bad.push(`bound back to F2 the key is ${key()} and ${STORE} is ${JSON.stringify(localStorage.getItem(STORE))}`);
       } catch (e) {
         bad.push(`threw: ${e.message}`);
       } finally {
@@ -2135,8 +2307,8 @@ export const runtime = [
       const eff = k => JSON.stringify(bus.get(k) === undefined ? null : bus.get(k));
       // the game's own touch test (main.js TOUCH) decides the default render distance
       const wantRd = String((matchMedia('(pointer: coarse)').matches || new URLSearchParams(location.search).has('touch')) ? 6 : 8);
-      const SEED = { 'ui.scale': 1.5, 'input.sens': 2, 'zoom.level': 8, 'zoom.key': 'KeyX', ...(bus._keybinds ? { 'perf.overlay': true } : {}) };
-      const perfKey = () => { const k = bus._keybinds ? (bus._keybinds() || []).find(x => x && x.id === 'tc.perfOverlay') : null; return k ? k.key : null; };
+      const SEED = { 'ui.scale': 1.5, 'input.sens': 2, 'zoom.level': 8, 'zoom.key': 'KeyX' };
+      const toggleKey = () => { const k = bus._keybinds ? (bus._keybinds() || []).find(x => x && x.id === 'tc.shaders.toggle') : null; return k ? k.key : null; };
       // The smoke profile is fresh, so what every option reads now is its default.
       const keys = [...new Set([...Object.keys(SEED), 'hud.on', ...Object.keys(bus.config || {})])];
       const fresh = {};
@@ -2149,7 +2321,14 @@ export const runtime = [
         await sleep(300);
         start = (all('#screen .inner .tc-tabs button.on')[0] || { getAttribute: () => null }).getAttribute('aria-label');
         for (const [k, v] of Object.entries(SEED)) bus.set(k, v);
-        if (perfKey()) bus.set('perf.key', 'F4'); // the overlay keybind, rebound (its reset puts back F2)
+        if (toggleKey()) { // the shader toggle, rebound on its row (its reset puts back F2)
+          if (!(await show('Keybinds'))) return 'no Keybinds tab';
+          const r = all('#screen .inner .tc-item').find(x => { const c = x.querySelector('.tc-cap'); return c && c.textContent === 'Toggle shaders'; }), b = r && r.querySelector('button');
+          if (!b) return 'no "Toggle shaders" row on the Keybinds tab';
+          b.click();
+          window.dispatchEvent(new KeyboardEvent('keydown', { code: 'F4', bubbles: true, cancelable: true }));
+          if (toggleKey() !== 'F4') return `can't verify: the shader toggle did not rebind to F4 (it is on ${toggleKey()})`;
+        }
         if (TE && typeof TE.set === 'function') { TE.set('saturation', 1.4); TE.applyPreset('quality', 'low'); }
         await bus.fov.set(90);
         localStorage.setItem('mc.rd', '12');
@@ -2174,9 +2353,7 @@ export const runtime = [
         if (TE && typeof TE.currentPreset === 'function' && (TE.currentPreset('quality') !== 'medium' || TE.currentPreset('look') !== 'natural')) issues.push(`shader pickers read ${TE.currentPreset('quality')} / ${TE.currentPreset('look')}, expected medium / natural`);
         if (localStorage.getItem('mc.fov') !== '70' || bus.fov.get() !== 70) issues.push(`FOV is mc.fov ${localStorage.getItem('mc.fov')} / ${bus.fov.get()}, expected 70`);
         if (localStorage.getItem('mc.rd') !== wantRd) issues.push(`mc.rd is ${localStorage.getItem('mc.rd')}, expected ${wantRd}`);
-        if (perfKey() && perfKey() !== 'F2') issues.push(`the performance overlay keybind is ${perfKey()} after the reset, expected F2`);
-        const po = document.getElementById('tc-perf');
-        if (po && !po.hidden) issues.push('the performance overlay (#tc-perf) is still shown after the reset');
+        if (toggleKey() && toggleKey() !== 'F2') issues.push(`the shader toggle is on ${toggleKey()} after the reset, expected F2`);
         if (!marker() || !/(^|\s)on(\s|$)/.test(scr.className) || !/(^|\s)dim(\s|$)/.test(scr.className)) issues.push(`our screen is not back after the reset (#screen class "${scr.className}")`);
       } catch (e) {
         issues.push(`threw: ${e.message}`);
@@ -2189,24 +2366,26 @@ export const runtime = [
       }
       return !issues.length || issues.join('; ');
     } },
-  // Better Options 1.3.1: driven through the Keybinds tab as a player would, on the overlay's keybind, which is always
-  // registered. It leaves F2 saved as perf.key, so it runs after "Reset all options", which needs a fresh profile.
-  { script: OPTIONS, name: 'binding a mod key to a key the game uses warns and still binds, a free key does not warn, a key another mod holds names it, and the overlay takes a modifier as its key',
+  // Better Options 1.3.1: driven through the Keybinds tab as a player would, on the shader toggle's row. Better Options has no
+  // keybind of its own since the overlay went, so alone it has no row to drive. A modifier as the key is in the tc.shaders.toggle
+  // check above. This runs after "Reset all options", which needs a fresh profile.
+  { script: [OPTIONS, SHADERS], name: 'binding a mod key to a key the game uses warns and still binds, a free key does not warn, and a key another mod holds names it',
     run: async () => {
       const M = await import('/js/menus.js');
       if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
       const bus = window.__tcOptions;
-      if (!bus || typeof bus._keybinds !== 'function' || typeof bus.open !== 'function') return 'window.__tcOptions._keybinds/open missing';
+      if (!bus || !window.Twitterentary) return true; // the row lives in Better Options' Keybinds tab and belongs to the shaders: alone, there is nothing to bind
+      if (typeof bus._keybinds !== 'function' || typeof bus.open !== 'function') return 'window.__tcOptions._keybinds/open missing';
       const scr = document.getElementById('screen'), note = document.getElementById('note'), before = scr.className;
       if (!note) return '#note missing';
       const all = s => [...document.querySelectorAll(s)], sleep = ms => new Promise(r => setTimeout(r, ms));
       const marker = () => !!document.querySelector('#screen .inner .tc-marker');
       const tab = n => all('#screen .inner .tc-tabs button').find(b => b.getAttribute('aria-label') === n);
       const show = async n => { const b = tab(n); if (!b) return false; b.click(); await __tcwait(() => { const x = tab(n); return x && x.classList.contains('on'); }, 1500); await sleep(100); return true; };
-      const key = () => ((bus._keybinds() || []).find(k => k && k.id === 'tc.perfOverlay') || {}).key;
+      const key = () => ((bus._keybinds() || []).find(k => k && k.id === 'tc.shaders.toggle') || {}).key;
       const bind = code => {
-        const r = all('#screen .inner .tc-item').find(x => { const c = x.querySelector('.tc-cap'); return c && c.textContent === 'Performance overlay'; }), b = r && r.querySelector('button');
-        if (!b) throw new Error('no "Performance overlay" row on the Keybinds tab');
+        const r = all('#screen .inner .tc-item').find(x => { const c = x.querySelector('.tc-cap'); return c && c.textContent === 'Toggle shaders'; }), b = r && r.querySelector('button');
+        if (!b) throw new Error('no "Toggle shaders" row on the Keybinds tab');
         b.click();
         note.textContent = '';
         window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true }));
@@ -2216,7 +2395,7 @@ export const runtime = [
       const GAME = ['KeyR', 'KeyC', 'KeyX', 'KeyK', 'KeyF', 'KeyV', 'KeyM', 'KeyO', 'KeyP', 'KeyL', 'Enter', 'Slash', 'Tab', 'F11', 'ShiftRight',
         'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'KeyW'];
       const K = await import('/js/keys.js').catch(() => null);
-      const perfHad = 'perf.key' in bus.config, perf0 = bus.config['perf.key'];
+      const key0 = key();
       const bad = [];
       let start = null;
       try {
@@ -2244,33 +2423,18 @@ export const runtime = [
         const free = bind('KeyJ');
         if (free) bad.push(`J is free, but #note says ${JSON.stringify(free)}`);
         // A key another mod already holds names that mod, and says so too if the game uses it
-        const others = (bus._keybinds() || []).filter(k => k && k.key && k.id !== 'tc.perfOverlay');
-        if ((window.Twitterentary || window.__tcZoom) && !others.length) bad.push('no other mod keybind to clash with');
+        const others = (bus._keybinds() || []).filter(k => k && k.key && k.id !== 'tc.shaders.toggle');
+        if (window.__tcZoom && !others.length) bad.push('no other mod keybind to clash with');
         for (const o of others) {
           const name = o.key.replace(/^Key/, ''), want = GAME.includes(o.key) ? `${name} is also a game key and ${o.label}` : `${name} is also ${o.label}`;
           const said = bind(o.key);
           if (said !== want) bad.push(`${o.id} on ${o.key}: #note says ${JSON.stringify(said)}, expected ${JSON.stringify(want)}`);
         }
-        // A modifier's own keydown has its flag set, so the flag can't count against it when it is the overlay's key
-        const flips = (code, mods) => {
-          const was = bus.get('perf.overlay', false), hit = () => window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true, ...mods }));
-          hit();
-          const did = bus.get('perf.overlay', false) !== was;
-          if (did) hit();
-          return did;
-        };
-        for (const [code, mods] of [['AltLeft', { altKey: true }], ['ControlRight', { ctrlKey: true }], ['MetaLeft', { metaKey: true }]]) {
-          bind(code);
-          if (key() !== code) bad.push(`${code} did not bind, the overlay key is on ${key()}`);
-          else if (!flips(code, mods)) bad.push(`bound to ${code}, its press does not toggle the overlay`);
-        }
-        bind('KeyJ');
-        if (!flips('KeyJ')) bad.push('bound to J, J does not toggle the overlay');
-        for (const mods of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }]) if (flips('KeyJ', mods)) bad.push(`${Object.keys(mods)[0]}+J toggled the overlay`);
       } catch (e) {
         bad.push(`threw: ${e.message}`);
       } finally {
-        bus.set('perf.key', perfHad ? perf0 : undefined); // undefined: back to not saved at all, so a later reset check sees a clean profile
+        try { bind(key0); } catch (e) { bad.push(`putting the toggle back threw: ${e.message}`); } // the default is stored as nothing, so a later check sees a clean profile
+        if (key() !== key0) bad.push(`the toggle was not put back: it is on ${key()}, it was on ${key0}`);
         try { if (marker() && start) await show(start); } catch (e) {}
         if (before) M.back(); else M.closeMenu(); // restore
       }
@@ -2303,7 +2467,7 @@ export const runtime = [
       if (!(await __tcwait(() => bus._nativeKeys(), 5000))) return 'native key mode never came on with js/keys.js present';
       if (bus.get('keys.migrated', false) !== true) return `the startup migration did not set keys.migrated (${json(bus.get('keys.migrated'))})`;
       const binds0 = K.BINDS.map(b => [b.id, K.codeOf(b.id)]);
-      const zoomHad = 'zoom.key' in bus.config, zoom0 = bus.config['zoom.key'], perfHad = 'perf.key' in bus.config, perf0 = bus.config['perf.key'];
+      const zoomHad = 'zoom.key' in bus.config, zoom0 = bus.config['zoom.key'];
       const TOGGLE = 'tc.shader.toggleKey', toggle0 = localStorage.getItem(TOGGLE);
       if (K.BINDS.some(b => K.codeOf(b.id) !== b.def)) return `can't verify: a fresh profile has moved binds (${binds0.filter(([id, c]) => c !== K.BINDS.find(b => b.id === id).def).join(' ')})`;
       const want = (what, got, ran, moved, skipped) => { if (json(got) !== json({ ran, moved, skipped })) bad.push(`${what}: _migrateKeys() gave ${json(got)}, expected ${json({ ran, moved, skipped })}`); };
@@ -2326,24 +2490,27 @@ export const runtime = [
         cleared('a swap and an alternative key');
         // The plan above counts on this: the game itself gives up an alternative key that a bind took as its own
         if (K.action('ArrowLeft') !== 'drop' || K.is('ArrowLeft', 'left')) bad.push(`the game kept its alternative key: action("ArrowLeft") is ${json(K.action('ArrowLeft'))}, is(ArrowLeft, left) is ${K.is('ArrowLeft', 'left')}, expected "drop" and false`);
-        // A remap from a key a mod answers to stays behind: with our capture listener gone, each press would run both
+        // A remap from a key a mod answers to stays behind: with our capture listener gone, each press would run both. F2 and Z
+        // are mod keys by default. K is not any more: it is only the game's blueprint key, in another scope, so it moves
         K.resetAll();
         plant({ KeyK: 'KeyW', KeyZ: 'KeyQ', F2: 'KeyQ' }, ['KeyW', 'KeyQ']);
         note.textContent = '';
-        want('a mod\'s default keys', await bus._migrateKeys(), true, 0, 3);
-        on('forward', 'KeyW'); on('drop', 'KeyQ');
+        want('a mod\'s default keys', await bus._migrateKeys(), true, 1, 2);
+        on('forward', 'KeyK'); on('drop', 'KeyQ');
         cleared('a mod\'s default keys');
-        if (!/skipped: 3 \(K, Z, F2 used by a mod\)/.test(note.textContent)) bad.push(`the toast does not name the mod keys: #note says ${json(note.textContent)}`);
-        // Saved keys count even with no script registered to report them, and a key a mod has left is free again
+        if (!/skipped: 2 \(Z, F2 used by a mod\)/.test(note.textContent)) bad.push(`the toast does not name the mod keys: #note says ${json(note.textContent)}`);
+        // Saved keys count even with no script registered to report them, and a key a mod has left is free again. A perf.key an
+        // older copy left behind counts for nothing: the overlay is gone, so N moves
+        K.resetAll();
         bus.set('zoom.key', 'KeyB');
         bus.set('perf.key', 'KeyN');
         localStorage.setItem(TOGGLE, 'KeyG');
         plant({ KeyB: 'KeyE', KeyN: 'KeyT', KeyG: 'KeyF', KeyZ: 'KeyQ' }, []);
-        want('saved mod keys elsewhere', await bus._migrateKeys(), true, 1, 3);
-        on('inventory', 'KeyE'); on('chat', 'KeyT'); on('swapHands', 'KeyF'); on('drop', 'KeyZ');
+        want('saved mod keys elsewhere', await bus._migrateKeys(), true, 2, 2);
+        on('inventory', 'KeyE'); on('chat', 'KeyN'); on('swapHands', 'KeyF'); on('drop', 'KeyZ');
         cleared('saved mod keys elsewhere');
         bus.set('zoom.key', zoomHad ? zoom0 : undefined);
-        bus.set('perf.key', perfHad ? perf0 : undefined);
+        delete bus.config['perf.key'];
         if (toggle0 === null) localStorage.removeItem(TOGGLE); else localStorage.setItem(TOGGLE, toggle0);
         // A key the game would throw away on reload is skipped alone: it must not fail the whole move
         K.resetAll();
@@ -2372,7 +2539,7 @@ export const runtime = [
         K.resetAll();
         for (const [id, code] of binds0) if (K.codeOf(id) !== code) K.set(id, code);
         bus.set('zoom.key', zoomHad ? zoom0 : undefined);
-        bus.set('perf.key', perfHad ? perf0 : undefined);
+        delete bus.config['perf.key']; // planted above: nothing saves it any more, so a clean profile has none
         if (toggle0 === null) localStorage.removeItem(TOGGLE); else localStorage.setItem(TOGGLE, toggle0);
         bus.set('keys.map', map0); bus.set('keys.mute', mute0); bus.set('keys.migrated', done0);
         await bus._injectKeys(K);
@@ -2537,10 +2704,10 @@ export const runtime = [
       if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
       const K = await import('/js/keys.js').catch(() => null);
       const scr = document.getElementById('screen'), before = scr.className;
-      const map0 = bus.get('keys.map', {}), perf0 = bus.get('perf.overlay', false);
+      const map0 = bus.get('keys.map', {}), T = window.Twitterentary, ENABLED = 'tc.shader.enabled', enabled0 = localStorage.getItem(ENABLED);
       const a = document.activeElement;
       if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) a.blur(); // remapping is off while typing
-      const perf = () => bus.get('perf.overlay', false);
+      const on0 = T ? T.cfg.enabled : null, flipped = () => !!T && T.cfg.enabled !== on0; // F2 is the shader toggle's, so it needs the shaders loaded
       const seen = [], spy = e => { if (e.__tc) seen.push(`${e.type}:${e.code}`); };
       const press = code => { seen.length = 0; for (const t of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(t, { code, bubbles: true, cancelable: true })); return seen.join(' '); };
       const bad = [];
@@ -2555,21 +2722,21 @@ export const runtime = [
         const plain = press('KeyJ');
         if (plain !== 'keydown:KeyQ keyup:KeyQ') bad.push(`a saved remap of J to Q sent [${plain}]`);
         const mod = press('F2');
-        if (mod !== 'keydown:KeyQ keyup:KeyQ') bad.push(`a saved remap on the overlay's F2 sent [${mod}]: it should win over the mod key`);
-        if (perf() !== perf0) bad.push('a saved remap on F2 also flipped the overlay');
+        if (mod !== 'keydown:KeyQ keyup:KeyQ') bad.push(`a saved remap on the shader toggle's F2 sent [${mod}]: it should win over the mod key`);
+        if (flipped()) bad.push('a saved remap on F2 also flipped the shaders');
         bus.set('keys.map', {});
         const free = press('F2');
         if (free) bad.push(`with nothing saved F2 was rewritten to [${free}]`);
-        if (perf() === perf0) bad.push('with nothing saved F2 did not flip the overlay');
-        else press('F2');
+        if (T && !flipped()) bad.push('with nothing saved F2 did not flip the shaders');
+        else if (T) press('F2');
         if (K) {
           await bus._injectKeys(K);
           if (!bus._nativeKeys()) bad.push('native key mode did not come back');
           bus.set('keys.map', { KeyJ: 'KeyQ', F2: 'KeyQ' });
           const retired = press('KeyJ') + press('F2');
           if (retired) bad.push(`with js/keys.js a leftover keys.map still rewrote keys: [${retired}]`);
-          if (perf() === perf0) bad.push('with js/keys.js a leftover remap on F2 still blocked the overlay');
-          else press('F2');
+          if (T && !flipped()) bad.push('with js/keys.js a leftover remap on F2 still blocked the shader toggle');
+          else if (T) press('F2');
         }
       } catch (e) {
         bad.push(`threw: ${e.message}`);
@@ -2577,7 +2744,10 @@ export const runtime = [
         removeEventListener('keydown', spy, true);
         removeEventListener('keyup', spy, true);
         bus.set('keys.map', map0);
-        if (perf() !== perf0) bus.set('perf.overlay', perf0);
+        if (T) {
+          if (flipped()) T.set('enabled', on0);
+          if (enabled0 === null) localStorage.removeItem(ENABLED); else localStorage.setItem(ENABLED, enabled0);
+        }
         if (K) await bus._injectKeys(K);
         if (before && !/(^|\s)on(\s|$)/.test(scr.className)) M.back(); // back to the title screen
       }
@@ -2599,11 +2769,11 @@ export const runtime = [
       try {
         if (T) {
           const was = T.cfg.enabled;
-          fire('keydown', 'KeyK', true);
-          if (T.cfg.enabled !== was) { bad.push('a __tc press of K toggled the shaders'); fire('keydown', 'KeyK', true); }
-          fire('keydown', 'KeyK'); // the control: the same key with no __tc does toggle
-          if (T.cfg.enabled === was) bad.push('can\'t verify: a plain K did not toggle the shaders');
-          else fire('keydown', 'KeyK');
+          fire('keydown', 'F2', true);
+          if (T.cfg.enabled !== was) { bad.push('a __tc press of F2 toggled the shaders'); fire('keydown', 'F2', true); }
+          fire('keydown', 'F2'); // the control: the same key with no __tc does toggle
+          if (T.cfg.enabled === was) bad.push('can\'t verify: a plain F2 did not toggle the shaders');
+          else fire('keydown', 'F2');
         }
         if (Z) {
           M.closeMenu();
@@ -2657,14 +2827,14 @@ export const runtime = [
     } },
   // Our listeners run before the game's recorder, so without their guards the key a player presses to record a bind would
   // also fire our action. Staging has no such screen. A build with only one of the two files is a change to look at.
-  { script: [SHADERS, OPTIONS, ZOOM], name: 'on the game\'s Controls screen K, F2 and Z do nothing, recording a bind on those keys still works, and back() returns to the game\'s Options',
+  { script: [SHADERS, OPTIONS, ZOOM], name: 'on the game\'s Controls screen F2 and Z do nothing, recording a bind on those keys and on K still works, and back() returns to the game\'s Options',
     run: async () => {
       const M = await import('/js/menus.js');
       if (!(await __tcwait(() => window.__ready === true, 30000))) return 'window.__ready never became true within 30 s: the world did not load in the test browser, or the game renamed the flag';
       const K = await import('/js/keys.js').catch(() => null), C = await import('/js/controls.js').catch(() => null);
       if (!K && !C) return true;
       if (!K || !C || typeof C.openControls !== 'function') return `js/keys.js (${!!K}) and js/controls.js with openControls (${!!C}) should come together`;
-      const T = window.Twitterentary, bus = window.__tcOptions, Z = window.__tcZoom;
+      const T = window.Twitterentary, Z = window.__tcZoom;
       const scr = document.getElementById('screen'), before = scr.className, sleep = ms => new Promise(r => setTimeout(r, ms));
       const prev = localStorage.getItem('mc.fov');
       const a = document.activeElement;
@@ -2672,13 +2842,12 @@ export const runtime = [
       const up = () => !!document.querySelector('#screen.on .keylist');
       const options = () => !!document.querySelector('#screen .inner input[type="range"][data-k="fov"]');
       const fire = (t, code) => window.dispatchEvent(new KeyboardEvent(t, { code, bubbles: true, cancelable: true }));
-      const state = () => JSON.stringify({ shaders: T ? T.cfg.enabled : null, overlay: bus ? bus.get('perf.overlay', false) : null, zoom: Z ? Z.zooming : null });
+      const state = () => JSON.stringify({ shaders: T ? T.cfg.enabled : null, zoom: Z ? Z.zooming : null });
       const bad = [];
       try {
         // The control: with no Controls screen up the same presses do act, so a silent pass below means something
         const s00 = state();
-        if (T) { fire('keydown', 'KeyK'); if (state() === s00) return 'can\'t verify: K did not toggle the shaders before the Controls screen opened'; fire('keydown', 'KeyK'); }
-        if (bus) { fire('keydown', 'F2'); if (state() === s00) return 'can\'t verify: F2 did not toggle the overlay before the Controls screen opened'; fire('keydown', 'F2'); }
+        if (T) { fire('keydown', 'F2'); if (state() === s00) return 'can\'t verify: F2 did not toggle the shaders before the Controls screen opened'; fire('keydown', 'F2'); }
         if (Z) { // the title has #screen on too, so Z needs the world in view to show it can act at all
           M.closeMenu();
           fire('keydown', 'KeyZ');
@@ -2690,7 +2859,7 @@ export const runtime = [
         C.openControls();
         if (!(await __tcwait(up, 3000))) return `the Controls screen did not open (#screen class "${scr.className}")`;
         const s0 = state();
-        for (const code of ['KeyK', 'F2', 'KeyZ']) {
+        for (const code of ['F2', 'KeyZ']) {
           fire('keydown', code);
           await sleep(100);
           if (state() !== s0) bad.push(`${code} acted on the Controls screen: ${s0} became ${state()}`);

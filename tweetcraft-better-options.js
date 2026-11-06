@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Tweetcraft Better Options
 // @namespace    tweetcraft.twitterentary
-// @version      1.4.0
-// @description  Adds a custom options menu for graphics, interface, keybinds, shaders, and zoom settings, plus a performance overlay and an in-game benchmark.
+// @version      1.5.0
+// @description  Adds a custom options menu for graphics, interface, keybinds, shaders, and zoom settings, plus extra shader lines on the F3 debug screen and an in-game benchmark.
 // @author       Twitterentary
 // @match        https://tweetcraft.jai.vin/*
 // @run-at       document-start
@@ -24,14 +24,15 @@
     'hud.on': true,
     'input.sens': 1,
     'keys.map': {},
-    'keys.mute': [],
-    'perf.overlay': false
+    'keys.mute': []
   };
 
   let cfg = {};
   try { cfg = JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { cfg = {}; }
   const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(cfg)); } catch (e) {} };
   const clone = v => (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
+  // The F2 performance overlay's settings, from before 1.5.0. Nothing reads them any more.
+  function dropStale() { if (cfg['perf.overlay'] !== undefined || cfg['perf.key'] !== undefined) { delete cfg['perf.overlay']; delete cfg['perf.key']; save(); } } dropStale();
 
   const sections = [];
   const keybinds = [];
@@ -447,6 +448,44 @@
   let hudPatched = false, _uiOverride = null, capturedFont = null;
   function noteFont(f) { if (f && typeof f.draw === 'function' && typeof f.width === 'function') capturedFont = f; }
   const hudScale = (gs, m) => (typeof gs !== 'number' || m === 1) ? gs : Math.max(1, Math.round(gs * m));
+  const isNum = v => typeof v === 'number' && Number.isFinite(v);
+  const fx1 = v => (isNum(v) ? v.toFixed(1) : '--');
+  const fx0 = v => (isNum(v) ? String(Math.round(v)) : '--');
+  // What the game's F3 screen lacks, from window.Twitterentary.perf (Shaders 1.5+). F3 already shows FPS and frame time.
+  // Runs on every Hud.draw while F3 is open: the strings are rebuilt at most every 250 ms, and nothing else allocates.
+  // o.debug is a fresh array each frame (main.js debugLines()). The lines are built before it's touched, so a failure
+  // leaves the game's lines as they were.
+  const F3_EVERY_MS = 250;
+  let f3At = -Infinity, f3Shaders = '', f3Shadows = '';
+  function addF3Lines(o) {
+    try {
+      const a = o && o.debug;
+      if (!Array.isArray(a)) return;
+      const TE = window.Twitterentary, p = TE && TE.perf;
+      if (!p || typeof p !== 'object') return;
+      const now = performance.now();
+      if (now - f3At >= F3_EVERY_MS) {
+        f3At = now;
+        f3Shaders = f3Shadows = ''; // stays empty if a read below throws, so old numbers never pass for new ones
+        const c = TE.cfg || {};
+        const shaders = 'Shaders: CPU ' + fx1(p.cpuMs) + ' ms, GPU ' + (isNum(p.gpuMs) ? p.gpuMs.toFixed(1) + ' ms' : 'n/a') + (p.cpuBound === true ? ', CPU-bound' : '');
+        const shadows = (c.enabled === false || c.shadows === false) ? 'Shadows: off' : 'Shadows: ' + fx0(p.shadowRefreshPerMin) + '/min';
+        f3Shaders = shaders; f3Shadows = shadows;
+      }
+      if (!f3Shaders) return;
+      let at = -1;
+      for (let i = 0; i < a.length; i++) {
+        const l = a[i];
+        if (typeof l !== 'string') continue;
+        if (l.startsWith('Shaders: CPU ')) return; // already there: a build that reuses its array must not grow it
+        if (at < 0 && l.startsWith('Frame:')) at = i + 1;
+      }
+      if (at < 0) at = a.length;
+      a.push(f3Shaders, f3Shadows);
+      for (let i = a.length - 1; i > at + 1; i--) a[i] = a[i - 2];
+      a[at] = f3Shaders; a[at + 1] = f3Shadows;
+    } catch (e) {}
+  }
   async function patchHudScale() {
     if (hudPatched) return;
     try {
@@ -457,6 +496,7 @@
         const orig = P.draw;
         const fn = function (o) {
           noteFont(this && this.font);
+          addF3Lines(o);
           const m = uiMult();
           if (m !== 1 && o && typeof o.gs === 'number') o = Object.assign({}, o, { gs: hudScale(o.gs, m) });
           return orig.call(this, o);
@@ -675,12 +715,6 @@
       /* the benchmark's see-through screen: one status line at the top, below the game's #note toast */
       #screen .inner:has(> .tc-bench-screen) { margin: 0 auto auto; padding-top: calc(14px + 16 * var(--u)); }
       #screen .inner .tc-bench-status { white-space: normal; text-align: center; max-width: 94vw; line-height: 1.25; }
-      /* the performance overlay: the game's F3 look (grey box, #e0e0e0 text) in the pixel font, top right.
-         --d is 1 font pixel at 2x, multiplied by our UI scale */
-      #tc-perf { position: fixed; top: max(calc(4 * var(--hp, 2px)), env(safe-area-inset-top)); right: max(calc(4 * var(--hp, 2px)), env(safe-area-inset-right)); z-index: 8; pointer-events: none; user-select: none; display: flex; flex-direction: column; align-items: flex-end; font: calc(8 * var(--d, 2px))/calc(9 * var(--d, 2px)) "Tweetcraft", ui-monospace, monospace; color: #e0e0e0; text-shadow: var(--d, 2px) var(--d, 2px) 0 #3f3f3f; white-space: pre; }
-      #tc-perf[hidden], #tc-perf > [hidden] { display: none !important; }
-      #tc-perf > div { padding: 0 var(--d, 2px) 0 calc(2 * var(--d, 2px)); background: rgba(80, 80, 80, 0.56); }
-      #tc-perf > .tc-perf-warn { color: #ffff55; }
       /* these now live in our menu, so drop them from the game's pause screen
          (English fallback; the labels in the player's language are in #tc-options-i18n) */
       #screen .inner button[aria-label^="Distance:"] { display: none !important; }
@@ -731,9 +765,6 @@
   function hudRow() {
     return item('HUD', toggle('HUD', !!bus.get('hud.on', true), toggleHud));
   }
-  function perfRow() {
-    return toggle('Performance overlay', !!bus.get('perf.overlay', false), v => bus.set('perf.overlay', v));
-  }
   // The game's own Options screen (held light, music, country, chat translation, language).
   // Its Done button goes back to the pause menu, or to the title with no world.
   async function openGameOptions() {
@@ -751,7 +782,7 @@
   }
   function graphicsSection() {
     return [
-      fovRow(), ...rdRows(), fullscreenRow(), scaleRow(), hudRow(), perfRow(),
+      fovRow(), ...rdRows(), fullscreenRow(), scaleRow(), hudRow(),
       sep(),
       btn('Game options…', openGameOptions),
       small('Held light, music, language and more.')
@@ -818,7 +849,7 @@
   function bindEntry(entry, newKey) {
     if (entry && (entry.get || entry.set)) {
       entry.set(newKey);
-      const warn = keyClash(entry, newKey); // a warning only: K is the shader toggle's default
+      const warn = keyClash(entry, newKey); // a warning only: a player may want a key shared
       if (warn) toast(warn, 3500);
       return;
     }
@@ -873,10 +904,9 @@
   function modKeysSaved() {
     const set = modKeySet();
     set.add(bus.get('zoom.key', 'KeyZ'));
-    set.add(bus.get('perf.key', PERF_KEY_DEF));
     let toggle = null;
     try { toggle = localStorage.getItem('tc.shader.toggleKey'); } catch (e) {}
-    set.add(toggle || 'KeyK');
+    set.add(toggle || 'F2');
     return set;
   }
   // One-time move of our saved remaps into the game's own bindings. keys.map is { physical key: game default code };
@@ -937,7 +967,7 @@
   // Test seams. _injectKeys: swap the module (null = a build without it) and run the startup step again.
   // _migrateKeys: the startup migration on demand; a run with the done flag set does nothing.
   bus._injectKeys = m => { _keys = m; _keysPending = Promise.resolve(m); return initNativeKeys(); };
-  bus._nativeKeys = () => !!nativeKeys;
+  bus._nativeKeys = () => !!nativeKeys; bus._dropStale = dropStale;
   bus._migrateKeys = async () => {
     const K = await keysMod();
     if (!K) return null;
@@ -967,7 +997,7 @@
       const kb = btn(isCap ? 'Press a key' : (cur ? prettyKey(cur) : '(none)'), () => { setCapturing({ entry }); refresh(); });
       list.append(item(entry.label, kb));
     }
-    out.push(list);
+    out.push(list.children.length ? list : note('No mod keys installed.'));
     out.push(sep());
     out.push(row(btn('Reset all keybinds', () => {
       bus.set('keys.map', {}); bus.set('keys.mute', []);
@@ -989,125 +1019,8 @@
     return { id: k.id, label: k.label, key };
   });
 
-  // ---- Performance overlay (#tc-perf): window.Twitterentary.perf (Shaders 1.5+), read 4x/s while it's shown.
-  // The game's own keys are F1, F3 and F5 (main.js onKeyDown); F2 is unbound there, in every browser, and in our
-  // other scripts (shaders K, zoom Z).
-  const PERF_KEY_DEF = 'F2';
-  const PERF_LINES = ['fps', 'cpu', 'bound', 'shadow'];
-  let perfKey = PERF_KEY_DEF;
-  function readPerfKey() { const k = bus.get('perf.key', PERF_KEY_DEF); perfKey = (typeof k === 'string' && k) ? k : PERF_KEY_DEF; }
-  readPerfKey();
-  let perfEl = null, perfTimer = 0, perfTop = '';
-  const perfLine = {};
-  function ensurePerfEl() {
-    if (perfEl) return perfEl;
-    if (!document.body) return null;
-    ensureCSS();
-    const el = h('div', { id: 'tc-perf', 'aria-hidden': 'true' });
-    for (const k of PERF_LINES) {
-      const d = h('div', { 'data-l': k });
-      if (k === 'bound') d.className = 'tc-perf-warn';
-      perfLine[k] = { el: d, text: '', off: false };
-      el.append(d);
-    }
-    el.hidden = true;
-    document.body.append(el);
-    perfEl = el;
-    return el;
-  }
-  // null hides the line. DOM writes only when the text changes.
-  function perfSet(k, text) {
-    const L = perfLine[k];
-    if (text === null) { if (!L.off) { L.el.hidden = true; L.off = true; } return; }
-    if (L.off) { L.el.hidden = false; L.off = false; }
-    if (L.text !== text) { L.el.textContent = text; L.text = text; }
-  }
-  const isNum = v => typeof v === 'number' && Number.isFinite(v);
-  const fx1 = v => (isNum(v) ? v.toFixed(1) : '--');
-  const fx0 = v => (isNum(v) ? String(Math.round(v)) : '--');
-  // Below the game's top-right HUD buttons (#hudright) while they're shown, else in the corner.
-  // #hudright's box depends only on #hudtop.hidden, its buttons (buildTop() replaces them) and --hp, plus the
-  // window size: the tick compares those cheap reads and measures (a forced layout) only when one changed.
-  const perfAt = { dirty: true, hidden: null, first: null, n: -1, hp: '', s: '', retry: 0 };
-  function placePerf() {
-    const top = document.getElementById('hudtop'), hr = document.getElementById('hudright');
-    const hidden = !top || top.hidden, first = hr ? hr.firstElementChild : null, n = hr ? hr.childElementCount : 0;
-    const rs = document.documentElement.style, hp = rs.getPropertyValue('--hp'), s = rs.getPropertyValue('--tc-s');
-    const A = perfAt;
-    const same = A.hidden === hidden && A.first === first && A.n === n && A.hp === hp && A.s === s;
-    if (same && !A.dirty) return;
-    if (!same) A.retry = 0;
-    A.dirty = false; A.hidden = hidden; A.first = first; A.n = n; A.hp = hp; A.s = s;
-    let y = '';
-    if (!hidden && first) {
-      const r = hr.getBoundingClientRect();
-      if (r.height > 0) y = 'calc(' + Math.round(r.bottom) + 'px + 2 * var(--hp, 2px))';
-      else if (++A.retry <= 8) A.dirty = true; // shown but not laid out yet: look again, for about 2 s at most
-    }
-    if (y !== perfTop) { perfTop = y; perfEl.style.top = y; }
-  }
-  addEventListener('resize', () => { perfAt.dirty = true; }, { passive: true });
-  function perfTick() {
-    try {
-      if (!perfEl || perfEl.hidden || document.hidden) return;
-      placePerf();
-      const TE = window.Twitterentary, p = TE && TE.perf, c = (TE && TE.cfg) || {};
-      if (!p || typeof p !== 'object') {
-        perfSet('fps', 'No performance data (needs Shaders 1.5)');
-        perfSet('cpu', null); perfSet('bound', null); perfSet('shadow', null);
-        return;
-      }
-      // fpsGame (Shaders 1.5.1+) counts frames the way the game's F3 line does, so the two agree
-      perfSet('fps', fx0(isNum(p.fpsGame) && p.fpsGame > 0 ? p.fpsGame : p.fps) + ' FPS · ' + fx1(p.ms) + ' ms');
-      perfSet('cpu', 'CPU ' + fx1(p.cpuMs) + ' ms · GPU ' + (isNum(p.gpuMs) ? p.gpuMs.toFixed(1) + ' ms' : 'n/a'));
-      perfSet('bound', p.cpuBound === true ? 'CPU-bound' : null);
-      perfSet('shadow', c.shadows === false ? 'Shadows off' : 'Shadows ' + fx0(p.shadowRefreshPerMin) + '/min');
-    } catch (e) {}
-  }
-  // Applies bus 'perf.overlay': the timer only runs while the overlay is shown.
-  function applyPerfOverlay() {
-    try {
-      if (bus.get('perf.overlay', false)) {
-        if (!ensurePerfEl()) return; // no <body> yet: DOMContentLoaded calls this again
-        perfEl.hidden = false;
-        perfAt.dirty = true;
-        if (!perfTimer) perfTimer = setInterval(perfTick, 250);
-        perfTick();
-      } else {
-        if (perfTimer) { clearInterval(perfTimer); perfTimer = 0; }
-        if (perfEl) perfEl.hidden = true;
-      }
-    } catch (e) { console.warn(TAG, 'performance overlay failed', e); }
-  }
-  bus.changed(k => {
-    if (k === 'perf.overlay') applyPerfOverlay();
-    else if (k === 'perf.key') readPerfKey();
-  });
-  bus.registerKeybind({
-    id: 'tc.perfOverlay', label: 'Performance overlay',
-    get: () => perfKey,
-    set: code => { if (typeof code === 'string' && code) bus.set('perf.key', code); },
-    reset: () => bus.set('perf.key', PERF_KEY_DEF)
-  });
   const chatOpen = () => { const c = document.getElementById('chatbox'); return !!c && !c.hidden; };
   const editorOpen = () => !!document.querySelector('.se, .sp, #sign-editor, #book-screen');
-  // The game's Controls screen: it shows nothing in the DOM while waiting for a key, so the whole screen counts.
-  const controlsOpen = () => !!document.querySelector('#screen.on .keylist');
-  // A harmless view toggle, so it works in menus too; never while typing, in chat, a container or an editor.
-  function onPerfKey(e) {
-    try {
-      if (e.code !== perfKey || e.repeat) return;
-      // A keydown of AltLeft has altKey set, so the modifier flags only rule out keys that aren't modifiers themselves.
-      if (!/^(Control|Alt|Meta)/.test(perfKey) && (e.ctrlKey || e.altKey || e.metaKey)) return;
-      if (e.__tc || e.__tcCaptured || bus.capturing || e.isComposing || e.keyCode === 229) return;
-      if (isTyping(e.target) || isTyping(document.activeElement)) return;
-      if (!invClosed() || chatOpen() || editorOpen() || controlsOpen()) return;
-      e.preventDefault();
-      bus.set('perf.overlay', !bus.get('perf.overlay', false));
-      if (ourMenuOpen() && curTab === 'graphics') refresh(); // relabel the toggle row
-    } catch (err) {}
-  }
-  addEventListener('keydown', onPerfKey, true);
 
   // ---- Shaders tab (window.Twitterentary; every member is feature-detected)
   function clearShaderKeys() {
@@ -1272,7 +1185,7 @@
   // this never walks the game's mc.* keys or the rest of localStorage, because those hold the player's identity.
   // tc.options holds only the keys below plus bench.last (a result, not a setting) and whatever other mods save, so
   // it's an allow-list too.
-  const OPTION_KEYS = ['ui.scale', 'hud.on', 'input.sens', 'keys.map', 'keys.mute', 'perf.overlay', 'perf.key', 'zoom.key', 'zoom.level', 'zoom.look'];
+  const OPTION_KEYS = ['ui.scale', 'hud.on', 'input.sens', 'keys.map', 'keys.mute', 'zoom.key', 'zoom.level', 'zoom.look'];
   // null when the script isn't loaded; an older copy that's loaded but has no version says so.
   const scriptVersion = (loaded, v) => (loaded ? String(v || 'unknown') : null);
   function gpuName() {
@@ -1779,7 +1692,7 @@
   const tryPatch = () => Promise.all([patchHudScale(), patchSurvivalScale()]).then(() => {
     if ((!hudPatched || !survPatched) && ++patchTries < 10) setTimeout(tryPatch, 300);
   });
-  domReady().then(() => { ensureCSS(); tryPatch(); startLabelObserver(); initLabels(); applyPerfOverlay(); initNativeKeys(); });
+  domReady().then(() => { ensureCSS(); tryPatch(); startLabelObserver(); initLabels(); initNativeKeys(); });
   addEventListener('resize', () => { applyUiScale(); setTimeout(applyUiScale, 0); });
   uiTimer = setInterval(reassertUiScale, 250);
   addEventListener('fullscreenchange', () => refresh());
