@@ -4,21 +4,26 @@ A collection of userscripts for [TweetCraft](https://tweetcraft.jai.vin). Instal
 
 ## Scripts
 
-- **Twitterentary shaders** - Adds shader-style lighting, sun shadows, waving plants, realistic water (see-through near you, reflective at a distance) and a dynamic sky. Pick a Quality and a Look preset or fine-tune each setting. The world is always drawn at your screen's full resolution. Every change applies instantly, with no reload, and K switches the shaders on and off.
-- **Tweetcraft Zoom** - Hold a key to zoom in and adjust your FOV for a closer look. The zoom runs on its own timer, so it moves in even steps even when the frame rate drops, and quick taps always end back on your own FOV.
+- **Twitterentary shaders** - Adds shader-style lighting, sun shadows, waving plants, realistic water (see-through near you, reflective at a distance) and a dynamic sky. Pick a Quality and a Look preset or fine-tune each setting. The world is always drawn at your screen's full resolution. Every change applies instantly, with no reload, and K switches the shaders on and off (rebind it in Better Options' Keybinds tab).
+- **Tweetcraft Zoom** - Hold a key (Z by default) to zoom in and adjust your FOV for a closer look. The zoom runs on its own timer, so it moves in even steps even when the frame rate drops, and quick taps always end back on your own FOV.
 - **Tweetcraft Better Options** - Adds a custom options menu for graphics, interface, keybinds, shaders, and zoom settings, with "Reset shaders" and "Reset all options" buttons and a shortcut to the game's own options (music, language and more). It also adds a performance overlay (F2), an in-game benchmark and a "Copy all settings" button. Works in every game language.
 - **Tweetcraft Chat History** - Minecraft-style chat history: press Up and Down to recall previously sent messages and commands.
 
 ## Notes
 
 - Every script runs only on `https://tweetcraft.jai.vin/*`.
-- **Tweetcraft Better Options** replaces the game's Options screen. The other scripts expose their settings through it (shaders, zoom, keybinds), so install it alongside them for full configuration.
+- **Tweetcraft Better Options** replaces the game's Options screen, from the pause menu and from the title screen. On the title screen the render distance setting applies when you join a world, and the HUD setting only works in a world. The other scripts expose their settings through it (shaders, zoom, keybinds), so install it alongside them for full configuration.
+- **Zoom key:** the default is now Z, because the game uses C. If you already set your own zoom key, it's kept, so a saved C stays on C and still clashes with the game: pick another one in the Keybinds tab.
+- **Keybinds tab** (Better Options): it now covers the mods' keys: shaders, zoom and the performance overlay.
+  - The game's own keys live in the game's Controls screen. The **Game controls…** button in the tab opens it.
+  - **Upgrading from 1.3:** game keys you remapped here carry over to Controls once, by themselves, and a message says how many moved. A remap onto a key the game already uses for something else is skipped. So is a remap from a key a mod answers to, because that key would then do both things; the message names those keys. An action you had turned off goes back to its default key, because the game can't leave an action without one.
+  - Binding a mod's key to a key the game or another mod also uses shows a warning, but the binding is kept.
 - **Shader presets:** open Options, then Shaders.
   - **Quality** (Low, Medium, High, Ultra) trades shadow detail for speed. Low turns sun shadows off. Since 1.5.0, High and Ultra draw a sharp shadow map close to you plus a wider one for the distance, which looks crisper than 1.4.0's single big map and costs less.
   - **Look** (Natural, Vivid, Soft) sets the light and colour.
   - The two combine freely. The default is Medium + Natural.
   - A picker shows "Custom" once you change one of its settings yourself.
-  - Press K in game to turn the shaders on or off. The choice is saved.
+  - Press K in game to turn the shaders on or off. The choice is saved. Rebind the key in the Keybinds tab.
   - **Upgrading from 1.4.0:** if you used High or Ultra unchanged, it's switched to the new 2048 shadow resolution once, so it shows High or Ultra again instead of "Custom". Settings you changed yourself are kept.
   - **Upgrading from 1.5.0:** render scale is gone, along with its Auto and sharpening settings. The world is always drawn at 100%, and old saved values are ignored, so a saved Quality preset reads as that preset again. In heavy scenes the frame rate can now drop below 60 where 1.5.0 would have lowered the resolution.
   - If your graphics card can't hold all of the game's textures in one array, the terrain keeps the game's own look. The sky effects still work.

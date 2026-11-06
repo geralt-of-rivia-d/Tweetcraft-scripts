@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweetcraft Zoom
 // @namespace    tweetcraft.zoom
-// @version      1.1.1
+// @version      1.1.2
 // @author       andrestube123
 // @description  Hold a key to zoom in and adjust your FOV for a closer look.
 // @match        https://tweetcraft.jai.vin/*
@@ -12,7 +12,7 @@
 (() => {
   "use strict";
 
-  const DEFAULTS = { key: "KeyC", level: 4, look: 1 };
+  const DEFAULTS = { key: "KeyZ", level: 4, look: 1 };
   let KEY = DEFAULTS.key;
   let zoom = DEFAULTS.level;
   let look = DEFAULTS.look;
@@ -26,7 +26,9 @@
   const typing = t => !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
   const gl = () => document.getElementById("gl");
   const screenOn = () => { const s = document.getElementById("screen"); return !!s && /(^|\s)on(\s|$)/.test(s.className || ""); };
-  const canZoom = () => !screenOn() && !typing(document.activeElement) && !!gl();
+  // .se is the game's skin editor, where Ctrl+Z is undo. #screen is normally on behind it, but wardrobe.js opens it
+  // after awaiting image loads, so a player who leaves the menu during that wait gets the editor with #screen off.
+  const canZoom = () => !screenOn() && !typing(document.activeElement) && !!gl() && !document.querySelector(".se");
   // Nothing on the page says the game's S.menu is empty except the crosshair (main.js hides it while a menu,
   // the inventory or a survival screen is up). Third person hides it too, which only makes us more careful.
   const crossOn = () => { const c = document.getElementById("cross"); return !!c && !c.classList.contains("off"); };
@@ -190,13 +192,13 @@
   refreshConfig();
 
   addEventListener("keydown", (e) => {
-    if (e.__tcCaptured || (window.__tcOptions && window.__tcOptions.capturing)) return;
+    if (e.__tc || e.__tcCaptured || (window.__tcOptions && window.__tcOptions.capturing)) return; // __tc: Better Options' own synthetic press
     if (e.code !== KEY || e.repeat) return;
     if (typing(e.target)) return;
     start();
   }, true);
   addEventListener("keyup", (e) => {
-    if (e.__tcCaptured || (window.__tcOptions && window.__tcOptions.capturing)) return;
+    if (e.__tc || e.__tcCaptured || (window.__tcOptions && window.__tcOptions.capturing)) return;
     if (e.code === KEY) stop();
   }, true);
   addEventListener("blur", endNow);
@@ -248,7 +250,7 @@
           api.slider("Zoom level", Math.round(zoom * 100) / 100, 1.5, 20, 0.5, v => { zoom = v; tcSet("level", v); }),
           api.slider("Look sensitivity (zoomed)", Math.round(Number(tcGet("look", DEFAULTS.look)) * 100) / 100, 0.1, 3, 0.05, v => { look = v; tcSet("look", v); refreshConfig(); }),
           api.note("Zoom key: " + (api.prettyKey ? api.prettyKey(KEY) : KEY) + " — change it in the Keybinds tab. Scroll to adjust the zoom while holding it."),
-          api.row(api.btn("Reset zoom key to C", () => { KEY = DEFAULTS.key; tcSet("key", DEFAULTS.key); if (api.refresh) api.refresh(); }))
+          api.row(api.btn("Reset zoom key to Z", () => { KEY = DEFAULTS.key; tcSet("key", DEFAULTS.key); if (api.refresh) api.refresh(); }))
         ]
       });
     }

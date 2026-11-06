@@ -177,9 +177,9 @@ npm run probe -- --scripts "<expr>"             # inspect resulting state
 
 - **Check the version and README:** confirm `@version` was bumped (`npm run check` enforces it) and update the
   README if users will see a difference.
-- **Ask the user for an in-game test** via the dev loaders (`npm run dev`). Tell them exactly what to try
-  (scenario, setting, where to look), because the automated run only covers the title-screen world in
-  software rendering.
 - **Update the codemaps** you used if anything in them turned out wrong or new (the codemaps owner does this, in a
   team).
-- **Commit and push only when asked.** CI (`game-watch.yml`) re-verifies against prod and staging on push.
+- **Commit and push to `main` before asking for an in-game test.** The user tests the pushed scripts, not the working
+  copy, so never ask them to test unpushed code. CI (`game-watch.yml`) re-verifies against prod and staging on push.
+- **Then ask the user for an in-game test.** Tell them exactly what to try (scenario, setting, where to look), because
+  the automated run only covers the title-screen world in software rendering.

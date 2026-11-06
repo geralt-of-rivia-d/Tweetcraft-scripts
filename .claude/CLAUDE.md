@@ -35,7 +35,9 @@ as the game updates.
   the user's account and the game. They aren't a reason to turn down an experiment, a tool or a new approach.
 - **Every new or changed game hook gets an entry in `compat/expectations.mjs`.** That is how updates that break it
   get caught.
-- Commit and push only when the user asks.
+- Commit and push only when the user asks, with one standing exception: **the user tests the pushed scripts, not the
+  working copy.** Once the gates pass, commit and push to `main` first, and only then ask for an in-game test. Never ask
+  for a test of unpushed code. Rule set by the user on 2026-11-06.
 
 ## Commands
 
@@ -74,7 +76,7 @@ Every script change follows the **`tweetcraft-dev-pipeline`** skill:
 3. Implement defensively.
 4. `npm run cloud -- test` (local `npm test` only when the cloud is unavailable).
 5. `userscript-reviewer`.
-6. Hand over for an in-game test.
+6. Commit and push to `main`, then hand over for an in-game test.
 
 - Don't skip phases. Scale their depth to the change.
 - **Fix the acceptance criteria and their metrics before implementing**, and ask for the user's real setup first.
@@ -148,7 +150,8 @@ Path-scoped rules in `.claude/rules/` load automatically when you touch userscri
    do. Never rename a script file or change its `@name`/`@namespace`: installed copies would stop updating. Keep
    any in-code version string (`bus.version`, `debug()` output) in sync, or better, read `GM_info.script.version`.
 3. Update the README script list if behaviour changed for users.
-4. Commit and push only when asked, then mention the CI run.
+4. Commit and push to `main` once the gates pass, before asking for an in-game test (the user tests the pushed
+   scripts), then mention the CI run. Otherwise, commit and push only when asked.
 
 ## Known issues
 
@@ -158,7 +161,7 @@ Notable ones:
 - `patchCloud()` never matches (double-escaped regexes), and its inserted `'\\n'` would break GLSL once the regexes
   are fixed. It's marked `known` in `compat/expectations.mjs`.
 - Better Options scales the HUD hint and the tab player list twice when UI scale isn't 1 (#45).
-- The shaders' K toggle can't be rebound (it isn't registered with `registerKeybind`).
-- Zoom's default `KeyC` collides with the game's undo-preview confirm key.
+- The shaders' default K overlaps the game's blueprint "keep" key. The user accepted this; it can be rebound (`tc.shaders.toggle`).
+- Zoom's default is `KeyZ` since 1.1.2. A stored `KeyC` still wins and keeps the clashes with blueprint paste, creative hotbar save and undo confirm.
 - GLSL trap: never write `flat ` in terrain GLSL, not even in a comment. Our own flat varying read by every terrain pixel cost ~2.3-3 GPU ms at rd 12
   on ANGLE D3D11, and smoke forbids the string.

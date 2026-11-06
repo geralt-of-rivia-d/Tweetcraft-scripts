@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tweetcraft Better Options
 // @namespace    tweetcraft.twitterentary
-// @version      1.3.0
+// @version      1.4.0
 // @description  Adds a custom options menu for graphics, interface, keybinds, shaders, and zoom settings, plus a performance overlay and an in-game benchmark.
 // @author       Twitterentary
 // @match        https://tweetcraft.jai.vin/*
@@ -44,9 +44,11 @@
     get: (k, d) => (cfg[k] !== undefined ? cfg[k] : (DEFAULTS[k] !== undefined ? clone(DEFAULTS[k]) : d)),
     set(k, v) { cfg[k] = v; save(); emit(k, v); },
     // Back to the defaults; every key that was set is re-announced so subscribers re-read it.
+    // The migration's done flag is a record, not a setting, so it stays.
     reset() {
-      const prev = Object.keys(cfg);
+      const prev = Object.keys(cfg), done = cfg[KEYS_DONE];
       cfg = clone(DEFAULTS);
+      if (done !== undefined) cfg[KEYS_DONE] = done;
       save();
       for (const k of prev) emit(k, bus.get(k));
     },
@@ -102,6 +104,24 @@
   }
   menus();
   bus._injectMenus = (m) => { _menusOverride = true; _menus = m; _menusPending = Promise.resolve(m); };
+
+  // ---- the game's own key bindings (js/keys.js; staging has none). null means this build has no rebinding.
+  // The URL has no query string, so this is the instance the game itself uses.
+  let _keys = null, _keysPending = null;
+  function keysMod() {
+    if (_keysPending) return _keysPending;
+    _keysPending = (async () => {
+      await domReady();
+      try {
+        const m = await import('/js/keys.js');
+        const ok = !!m && ['codeOf', 'action', 'bound', 'set'].every(n => typeof m[n] === 'function') && Array.isArray(m.BINDS);
+        if (!ok) console.warn(TAG, 'js/keys.js is not the module we know, keeping our own key rows');
+        _keys = ok ? m : null;
+      } catch (e) { console.info(TAG, 'this build has no js/keys.js, keeping our own key rows'); _keys = null; }
+      return _keys;
+    })();
+    return _keysPending;
+  }
 
   // ---- the game's translations: pause-menu labels we look for, in the player's language
   let _i18n = null, _i18nPending = null;
@@ -194,8 +214,10 @@
   // input, detached, and write through it. fovInput: undefined = not fetched yet, null = the game has no such input.
   let fovInput, fovFails = 0, primeObs = null;
   const noExitLock = () => {};
+  // The title has the same Options button (not on staging yet), so the button alone proves nothing. showScreen sets
+  // className "on <look>": pause uses "dim", the title "title". A positive "dim" test leaves any new screen alone.
   function pauseUp() {
-    if (!screenIsOn()) return false;
+    if (!screenIsOn() || !document.getElementById('screen').classList.contains('dim')) return false;
     for (const b of document.querySelectorAll('#screen .inner button[aria-label]')) {
       if (LBL.options.has(b.getAttribute('aria-label'))) return true;
     }
@@ -294,6 +316,11 @@
   }
   bus.fov = { get: getFov, set: setFov, setNow: setFovNow, prime: primeFov, _forget: () => { fovInput = undefined; } };
 
+  // True on a page with no world: the title, or any path that isn't a world's. The game's own test (ROOM in main.js;
+  // its TITLE is !ROOM), framed or not, and joining a world reloads the page. Never #screen's class: our menu
+  // replaces the title's look with "dim".
+  const noWorld = () => !/^\/(?:r|play)\/[a-z0-9]{16}\/?$/.test(location.pathname);
+
   const currentRd = () => { const v = Number(store.get('mc.rd')); return RDS.includes(v) ? v : 8; };
   // The pause menu's Distance button, found by its label in the current language.
   function distanceButton() {
@@ -332,31 +359,57 @@
     } catch (e) { toast("Fullscreen isn't allowed here"); }
     refresh();
   }
-  // The game only toggles its HUD on a real F1 while no menu is open: close, press, reopen ours.
+  // The key that hides the HUD now, or null when no synthetic press can do it: bound to a mouse button, or sharing its
+  // key with any other bind in any scope. Our press must never run another action: a place-scope bind such as bpPaste
+  // would make the game send a network message. F1 on a build with no js/keys.js.
+  async function hudKey() {
+    const K = await keysMod();
+    if (!K) return 'F1';
+    try {
+      const code = K.codeOf('hideHud');
+      if (typeof code !== 'string' || code.startsWith('Mouse') || K.action(code) !== 'hideHud') return null;
+      return K.BINDS.some(b => b && b.id !== 'hideHud' && K.codeOf(b.id) === code) ? null : code;
+    } catch (e) { console.warn(TAG, e); return null; }
+  }
+  const HUD_KEY_TOAST = "Can't reach the HUD key. Check it in the game's Controls";
+  // The game only toggles its HUD on a real key press while no menu is open: close, press, reopen ours. Resolves true
+  // only if the press was sent.
   // onlyIfHidden: press only when the game's HUD is really hidden (closeMenu() runs updateTop(), which sets
   // #hudtop.hidden = !(in world && showHud)); our saved hud.on can be stale, and a missing #hudtop means
   // we can't tell, so we leave the HUD alone.
   async function sendF1(onlyIfHidden) {
     const M = await menus();
-    if (!M) return;
+    if (!M) return false;
+    const code = await hudKey();
+    if (!code && !onlyIfHidden) { toast(HUD_KEY_TOAST, 3000); return false; }
     const wasOurs = ourMenuOpen();
+    let sent = false;
     try {
       M.closeMenu();
       const top = document.getElementById('hudtop');
       if (!onlyIfHidden || (top && top.hidden)) {
-        const down = new KeyboardEvent('keydown', { code: 'F1', key: 'F1', bubbles: true });
-        down.__tc = true;
-        window.dispatchEvent(down);
-        const up = new KeyboardEvent('keyup', { code: 'F1', key: 'F1', bubbles: true });
-        up.__tc = true;
-        window.dispatchEvent(up);
+        if (!code) toast(HUD_KEY_TOAST, 3000);
+        else {
+          const key = keyName(code);
+          const down = new KeyboardEvent('keydown', { code, key, bubbles: true });
+          down.__tc = true;
+          window.dispatchEvent(down);
+          const up = new KeyboardEvent('keyup', { code, key, bubbles: true });
+          up.__tc = true;
+          window.dispatchEvent(up);
+          sent = true;
+        }
       }
     } catch (e) { console.warn(TAG, e); }
     try { if (wasOurs) M.showScreen(MENU_NAME, buildScreen, 'dim'); } catch (e) {}
+    return sent;
   }
+  bus._sendF1 = onlyIfHidden => sendF1(onlyIfHidden);
+  // The game ignores F1 before a world starts, so saving a flip here would leave hud.on inverted once in a world.
   async function toggleHud() {
-    bus.set('hud.on', !bus.get('hud.on', true));
-    await sendF1();
+    if (noWorld()) { toast('The HUD can only be changed in a world', 3000); refresh(); return; } // refresh: the row already flipped its label
+    if (await sendF1()) bus.set('hud.on', !bus.get('hud.on', true));
+    refresh(); // the row flipped its own label: show what really happened
   }
 
   let uiTimer = 0;
@@ -662,9 +715,10 @@
     syncFov();
     return slider('Field of View', Math.round(getFov()), 30, 110, 1, v => { setFov(v); });
   }
-  function rdRow() {
+  function rdRows() {
     const cur = currentRd();
-    return slider('Render distance', cur, RDS[0], RDS[RDS.length - 1], 2, null, v => { setRenderDistance(v).then(refresh); });
+    const s = slider('Render distance', cur, RDS[0], RDS[RDS.length - 1], 2, null, v => { setRenderDistance(v).then(refresh); });
+    return noWorld() ? [s, small('Applies when you join a world.')] : [s]; // with no world it only saves mc.rd
   }
   function fullscreenRow() {
     const on = !!document.fullscreenElement;
@@ -681,15 +735,23 @@
     return toggle('Performance overlay', !!bus.get('perf.overlay', false), v => bus.set('perf.overlay', v));
   }
   // The game's own Options screen (held light, music, country, chat translation, language).
-  // Its Done button goes back to the pause menu.
+  // Its Done button goes back to the pause menu, or to the title with no world.
   async function openGameOptions() {
     const M = await menus();
     if (!M || typeof M.openOptions !== 'function') { toast('Options unavailable'); return; }
     try { M.openOptions(); } catch (e) { console.warn(TAG, e); }
   }
+  // The game's Controls screen, where its keys are rebound. Its Done button goes back to the game's Options.
+  async function openGameControls() {
+    try {
+      const c = await import('/js/controls.js');
+      if (c && typeof c.openControls === 'function') { c.openControls(); return; }
+    } catch (e) { console.warn(TAG, 'Controls not available', e); }
+    openGameOptions();
+  }
   function graphicsSection() {
     return [
-      fovRow(), rdRow(), fullscreenRow(), scaleRow(), hudRow(), perfRow(),
+      fovRow(), ...rdRows(), fullscreenRow(), scaleRow(), hudRow(), perfRow(),
       sep(),
       btn('Game options…', openGameOptions),
       small('Held light, music, language and more.')
@@ -726,10 +788,11 @@
       return;
     }
 
-    if (!remapActive()) return;
-    if (modKeySet().has(e.code)) return;
+    if (nativeKeys || !remapActive()) return; // the game rebinds its own keys now
     const map = bus.get('keys.map', {}) || {};
     const to = map[e.code];
+    // a saved remap wins over a mod's default key: it was there first
+    if (!to && modKeySet().has(e.code)) return;
     if (to) {
       e.preventDefault(); e.stopImmediatePropagation();
       const ev = new KeyboardEvent(e.type, {
@@ -753,7 +816,12 @@
     return mute.includes(def) ? null : def;
   }
   function bindEntry(entry, newKey) {
-    if (entry && (entry.get || entry.set)) { entry.set(newKey); return; }
+    if (entry && (entry.get || entry.set)) {
+      entry.set(newKey);
+      const warn = keyClash(entry, newKey); // a warning only: K is the shader toggle's default
+      if (warn) toast(warn, 3500);
+      return;
+    }
     const def = entry.def;
     const map = bus.get('keys.map', {}) || {};
     const mute = (bus.get('keys.mute', []) || []).slice();
@@ -771,16 +839,126 @@
     ['Drop item', 'KeyQ'], ['Inventory', 'KeyE'], ['Chat', 'KeyT'], ['View', 'F5'],
     ['Debug (F3)', 'F3'], ['HUD (F1)', 'F1']
   ];
+  // Keys a build with no js/keys.js also uses that aren't remappable rows above: main.js onKeyDown, blueprint-ui.js
+  // key() (R, K, C) and survival/hotbars.js (R, and C and X held with a digit). Only ever read when a mod keybind is set.
+  const GAME_ONLY_KEYS = new Set([
+    'KeyR', 'KeyC', 'KeyX', 'KeyK', 'KeyF', 'KeyV', 'KeyM', 'KeyO', 'KeyP', 'KeyL', 'Enter', 'Slash', 'Tab', 'F11', 'ShiftRight',
+    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+    'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9'
+  ]);
+  function isGameKey(code) {
+    if (_keys) { try { return !!_keys.bound(code); } catch (e) {} }
+    return GAME_ONLY_KEYS.has(code) || GAME_ACTIONS.some(a => currentKeyFor(a[1]) === code);
+  }
+  // The mod keybind other than entry that holds code, or null.
+  function modHolding(entry, code) {
+    for (const kb of keybinds) {
+      if ('m:' + kb.id === entry.id) continue;
+      try { if (kb.get && kb.get() === code) return kb; } catch (e) {}
+    }
+    return null;
+  }
+  // What to warn about after a mod keybind took code: '' if nothing.
+  function keyClash(entry, code) {
+    const game = isGameKey(code), mod = modHolding(entry, code), name = prettyKey(code);
+    if (game && mod) return name + ' is also a game key and ' + mod.label;
+    if (game) return name + ' is also a game key';
+    return mod ? name + ' is also ' + mod.label : '';
+  }
+
+  const KEYS_DONE = 'keys.migrated';
+  const BIND_CODE = /^[A-Z][A-Za-z0-9]{0,24}$/; // what the game's keys.js keeps on reload
+  // Every key a mod answers to, for the migration. It runs at startup, when Zoom and the shaders may not have registered
+  // yet, so their saved keys are read too. A script that isn't installed only costs that one remap.
+  function modKeysSaved() {
+    const set = modKeySet();
+    set.add(bus.get('zoom.key', 'KeyZ'));
+    set.add(bus.get('perf.key', PERF_KEY_DEF));
+    let toggle = null;
+    try { toggle = localStorage.getItem('tc.shader.toggleKey'); } catch (e) {}
+    set.add(toggle || 'KeyK');
+    return set;
+  }
+  // One-time move of our saved remaps into the game's own bindings. keys.map is { physical key: game default code };
+  // keys.mute lists the defaults those replaced. A native bind always wins. Returns { moved, skipped }, or null with the
+  // old data kept and anything already set put back if it can't finish. The game has no unbound state, so an action
+  // muted with no replacement can't move: it goes back to its default key and counts as skipped. So does a remap from a
+  // key a mod answers to: our capture listener used to stop that press, and with it gone every press would run both.
+  function migrateKeys(K) {
+    const applied = [];
+    try {
+      const rawMap = bus.get('keys.map', {}), rawMute = bus.get('keys.mute', []);
+      const map = (rawMap && typeof rawMap === 'object') ? rawMap : {}, mute = Array.isArray(rawMute) ? rawMute : [];
+      const plan = new Map(); // bind id -> physical key
+      const modKeys = modKeysSaved(), clashes = [];
+      let skipped = 0;
+      for (const src of Object.keys(map)) {
+        const b = K.BINDS.find(x => x && x.scope === 'game' && x.def === map[src]);
+        if (b && modKeys.has(src)) { clashes.push(prettyKey(src)); skipped++; }
+        else if (!b || !BIND_CODE.test(src) || plan.has(b.id) || K.codeOf(b.id) !== b.def) skipped++;
+        else plan.set(b.id, src);
+      }
+      // Only a bind's own key counts as taken: the game gives up an alt key (arrows, Enter, ShiftRight) by itself. A bind
+      // that's moving in this plan leaves its key free, which keeps a swap (W and S) whole, so go round until it settles.
+      const held = (code, id) => K.BINDS.some(x => x && x.scope === 'game' && x.id !== id && !plan.has(x.id) && K.codeOf(x.id) === code);
+      for (let again = true; again;) {
+        again = false;
+        for (const [id, code] of plan) if (held(code, id)) { plan.delete(id); skipped++; again = true; }
+      }
+      for (const [id, code] of plan) {
+        const was = K.codeOf(id);
+        K.set(id, code);
+        applied.push([id, was]);
+        if (K.codeOf(id) !== code) throw new Error('bind ' + id + ' did not take ' + code);
+      }
+      const remapped = new Set(Object.values(map));
+      for (const def of mute) if (!remapped.has(def)) skipped++;
+      bus.set('keys.map', {});
+      bus.set('keys.mute', []);
+      bus.set(KEYS_DONE, true);
+      if (plan.size || skipped) toast('Keys moved to the game\'s Controls: ' + plan.size + ', skipped: ' + skipped + (clashes.length ? ' (' + clashes.join(', ') + ' used by a mod)' : ''), 6000);
+      return { moved: plan.size, skipped };
+    } catch (e) {
+      console.warn(TAG, 'key migration failed, keeping our own key rows', e);
+      for (const [id, was] of applied.reverse()) { try { K.set(id, was); } catch (e2) {} }
+      return null;
+    }
+  }
+  // The module once the saved remaps are in it; null keeps our own rows and remap (staging, or a failed migration).
+  let nativeKeys = null;
+  async function initNativeKeys() {
+    try {
+      const K = await keysMod();
+      nativeKeys = (K && (bus.get(KEYS_DONE, false) === true || migrateKeys(K))) ? K : null;
+      refresh();
+    } catch (e) { nativeKeys = null; console.warn(TAG, e); }
+    return !!nativeKeys;
+  }
+  // Test seams. _injectKeys: swap the module (null = a build without it) and run the startup step again.
+  // _migrateKeys: the startup migration on demand; a run with the done flag set does nothing.
+  bus._injectKeys = m => { _keys = m; _keysPending = Promise.resolve(m); return initNativeKeys(); };
+  bus._nativeKeys = () => !!nativeKeys;
+  bus._migrateKeys = async () => {
+    const K = await keysMod();
+    if (!K) return null;
+    if (bus.get(KEYS_DONE, false) === true) return { ran: false, moved: 0, skipped: 0 };
+    const r = migrateKeys(K);
+    nativeKeys = r ? K : null;
+    return r ? { ran: true, moved: r.moved, skipped: r.skipped } : null;
+  };
   function keybindEntries() {
-    const list = GAME_ACTIONS.map(([label, def]) => ({ id: 'g:' + def, label, def }));
+    const list = nativeKeys ? [] : GAME_ACTIONS.map(([label, def]) => ({ id: 'g:' + def, label, def }));
     for (const kb of keybinds) list.push({ id: 'm:' + kb.id, label: kb.label, get: kb.get, set: kb.set });
     return list;
   }
   function entryKey(entry) { return entry.get ? entry.get() : currentKeyFor(entry.def); }
 
   function keybindsSection() {
-    const out = [header('Keybinds'), note('Click a key to change it, then press the new key. Escape cancels. Game keys are remapped; mod keys are handled by their script.')];
+    const out = [header('Keybinds'), note(nativeKeys
+      ? 'Click a key to change it, then press the new key. Escape cancels. These are the mods\' keys; game keys are in the game\'s Controls.'
+      : 'Click a key to change it, then press the new key. Escape cancels. Game keys are remapped; mod keys are handled by their script.')];
     out.push(slider('Mouse sensitivity', Number(bus.get('input.sens', 1)), 0.25, 3, 0.05, v => bus.set('input.sens', v)));
+    if (nativeKeys) out.push(row(btn('Game controls…', () => { openGameControls(); })));
     out.push(sep());
     const list = h('div', { class: 'tc-list' });
     for (const entry of keybindEntries()) {
@@ -813,7 +991,7 @@
 
   // ---- Performance overlay (#tc-perf): window.Twitterentary.perf (Shaders 1.5+), read 4x/s while it's shown.
   // The game's own keys are F1, F3 and F5 (main.js onKeyDown); F2 is unbound there, in every browser, and in our
-  // other scripts (shaders K, zoom C).
+  // other scripts (shaders K, zoom Z).
   const PERF_KEY_DEF = 'F2';
   const PERF_LINES = ['fps', 'cpu', 'bound', 'shadow'];
   let perfKey = PERF_KEY_DEF;
@@ -913,13 +1091,17 @@
   });
   const chatOpen = () => { const c = document.getElementById('chatbox'); return !!c && !c.hidden; };
   const editorOpen = () => !!document.querySelector('.se, .sp, #sign-editor, #book-screen');
+  // The game's Controls screen: it shows nothing in the DOM while waiting for a key, so the whole screen counts.
+  const controlsOpen = () => !!document.querySelector('#screen.on .keylist');
   // A harmless view toggle, so it works in menus too; never while typing, in chat, a container or an editor.
   function onPerfKey(e) {
     try {
-      if (e.code !== perfKey || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.code !== perfKey || e.repeat) return;
+      // A keydown of AltLeft has altKey set, so the modifier flags only rule out keys that aren't modifiers themselves.
+      if (!/^(Control|Alt|Meta)/.test(perfKey) && (e.ctrlKey || e.altKey || e.metaKey)) return;
       if (e.__tc || e.__tcCaptured || bus.capturing || e.isComposing || e.keyCode === 229) return;
       if (isTyping(e.target) || isTyping(document.activeElement)) return;
-      if (!invClosed() || chatOpen() || editorOpen()) return;
+      if (!invClosed() || chatOpen() || editorOpen() || controlsOpen()) return;
       e.preventDefault();
       bus.set('perf.overlay', !bus.get('perf.overlay', false));
       if (ourMenuOpen() && curTab === 'graphics') refresh(); // relabel the toggle row
@@ -1495,7 +1677,7 @@
     return [
       header('About'),
       note('Better Options v' + VERSION + '. Settings are saved automatically.'),
-      note('Opened from the pause menu\'s Options button. Escape goes back.'),
+      note('Opened from the game\'s Options button. Escape goes back.'),
       sep(),
       copySettingsButton(),
       small('Your settings, script versions and GPU name as text, to share. No account details.'),
@@ -1567,7 +1749,7 @@
     if (_menus && ourMenuOpen()) { try { _menus.refresh(); } catch (e) {} }
   }
 
-  // The pause menu's "Options…" (in the player's language) opens our menu instead.
+  // The game's "Options…" (on the pause menu and the title, in the player's language) opens our menu instead.
   function onDocClick(e) {
     const t = e.target;
     if (!t || typeof t.closest !== 'function') return;
@@ -1597,10 +1779,10 @@
   const tryPatch = () => Promise.all([patchHudScale(), patchSurvivalScale()]).then(() => {
     if ((!hudPatched || !survPatched) && ++patchTries < 10) setTimeout(tryPatch, 300);
   });
-  domReady().then(() => { ensureCSS(); tryPatch(); startLabelObserver(); initLabels(); applyPerfOverlay(); });
+  domReady().then(() => { ensureCSS(); tryPatch(); startLabelObserver(); initLabels(); applyPerfOverlay(); initNativeKeys(); });
   addEventListener('resize', () => { applyUiScale(); setTimeout(applyUiScale, 0); });
   uiTimer = setInterval(reassertUiScale, 250);
   addEventListener('fullscreenchange', () => refresh());
 
-  console.info(TAG, 'loaded. Open it from the pause menu\'s "Options…" button.');
+  console.info(TAG, 'loaded. Open it from the game\'s "Options…" button.');
 })();

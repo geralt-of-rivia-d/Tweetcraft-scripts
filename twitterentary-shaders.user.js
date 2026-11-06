@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitterentary shaders
 // @namespace    tweetcraft.twitterentary
-// @version      1.5.1
+// @version      1.5.2
 // @author       andrestube123
 // @description  Adds shader-style lighting, sun shadows, waving plants, reflective water, and a dynamic sky to TweetCraft, with Quality and Look presets.
 // @match        https://tweetcraft.jai.vin/*
@@ -154,6 +154,19 @@
                 localStorage.setItem(FORMAT_KEY, FORMAT); formatSaved = true;
                 console.info(TAG, 'Updated a 1.4.0 Quality preset: shadow resolution 2048 plus a near tile');
             }
+        } catch (e) {}
+    }
+
+    // The on/off key. Saved the way persist() saves a setting (only when it isn't the default), but kept out of
+    // CFG: it is a key code, not a shader setting, and CFG's shape is what Better Options and the bench read.
+    const TOGGLE_DEFAULT = 'KeyK', TOGGLE_STORE = SKEY('toggleKey');
+    let toggleKey = TOGGLE_DEFAULT;
+    try { toggleKey = localStorage.getItem(TOGGLE_STORE) || TOGGLE_DEFAULT; } catch (e) {}
+    function setToggleKey(code) {
+        toggleKey = (typeof code === 'string' && code) || TOGGLE_DEFAULT;
+        try {
+            if (toggleKey === TOGGLE_DEFAULT) localStorage.removeItem(TOGGLE_STORE);
+            else localStorage.setItem(TOGGLE_STORE, toggleKey);
         } catch (e) {}
     }
 
@@ -624,7 +637,8 @@ ${mode === 2 ? WATER_CODE : ''}
     const RE_EMIT = /lava|magma|lumen|glowstone|torch|lantern|fire|beacon|shroomlight|sea_lantern|jack_o|redstone_lamp_on|spark_lamp_on|campfire/i;
     const RE_PLANT = /^(short_grass|grass|tall_grass.*|fern|large_fern.*|.*sapling|.*_tulip|poppy|dandelion|blue_orchid|allium|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|rose_bush.*|peony.*|lilac.*|sunflower.*|dead_bush|sugar_cane|.*seagrass.*|kelp.*|wheat_stage.*|carrots_stage.*|potatoes_stage.*|beetroots_stage.*|vine|sweet_berry_bush.*|torchflower.*|pitcher.*|.*_roots|.*_sprouts|bush|flower.*)$/i;
     function nameClass(nm) {
-        if (RE_EMIT.test(nm) && !/torch_top|torch_off|lantern_top/.test(nm)) return 4;
+        // campfire_log is the unlit log; campfire_log_lit and campfire_fire do glow
+        if (RE_EMIT.test(nm) && !/torch_top|torch_off|lantern_top|^campfire_log$/.test(nm)) return 4;
         if (/leaves/i.test(nm)) return 1;
         if (/^water/i.test(nm)) return 3;
         if (RE_PLANT.test(nm)) return 2;
@@ -1975,6 +1989,7 @@ void main() {
     // Restores every default and removes every saved shader setting, including keys older versions used.
     function reset() {
         for (const k in DEFAULTS) CFG[k] = DEFAULTS[k];
+        toggleKey = TOGGLE_DEFAULT; // its saved value goes with the other tc.shader.* keys below
         try {
             const keys = [];
             for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('tc.shader.')) keys.push(k); }
@@ -2025,14 +2040,39 @@ void main() {
         } catch (e) {}
     }
     addEventListener('keydown', e => {
-        if (e.code !== 'KeyK' || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-        if (e.__tcCaptured || (window.__tcOptions && window.__tcOptions.capturing) || bench.running) return;
+        if (e.code !== toggleKey || e.repeat) return;
+        // A keydown of AltLeft has altKey set, so the modifier flags only rule out keys that aren't modifiers themselves.
+        if (!/^(Control|Alt|Meta)/.test(toggleKey) && (e.ctrlKey || e.metaKey || e.altKey)) return;
+        if (e.__tc || e.__tcCaptured || (window.__tcOptions && window.__tcOptions.capturing) || bench.running) return; // __tc: Better Options' own synthetic press
         const t = e.target;
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+        // The game's Controls screen takes the next key press, and nothing on the page says it is waiting for one.
+        if (document.querySelector('#screen.on .keylist')) return;
         set('enabled', !CFG.enabled);
         console.info(TAG, 'Shaders ' + (CFG.enabled ? 'ON' : 'OFF'));
         notify('Twitterentary shaders: ' + (CFG.enabled ? 'ON' : 'OFF'));
     }, true);
 
-    console.info(TAG, 'Twitterentary v' + VERSION + ' loaded. Press K to toggle shaders. Config: Twitterentary.cfg | Presets: Twitterentary.presets | Diagnostics: Twitterentary.debug()');
+    // Better Options may load after this script, or not at all: the listener above needs no bus, so this only adds
+    // the row to its Keybinds tab, and it stops looking after 20 s.
+    function registerToggleKey(tries) {
+        const bus = window.__tcOptions;
+        if (!bus || typeof bus.registerKeybind !== 'function') {
+            if (tries > 1) setTimeout(registerToggleKey, 200, tries - 1);
+            return;
+        }
+        try {
+            bus.registerKeybind({
+                id: 'tc.shaders.toggle',
+                label: 'Toggle shaders',
+                defaultKey: TOGGLE_DEFAULT,
+                get: () => toggleKey,
+                set: setToggleKey,
+                reset: () => setToggleKey(TOGGLE_DEFAULT)
+            });
+        } catch (e) { console.warn(TAG, 'keybind registration failed', e); }
+    }
+    registerToggleKey(100);
+
+    console.info(TAG, 'Twitterentary v' + VERSION + ' loaded. Press ' + toggleKey.replace(/^(?:Key|Digit)/, '') + ' to toggle shaders. Config: Twitterentary.cfg | Presets: Twitterentary.presets | Diagnostics: Twitterentary.debug()');
 })();
